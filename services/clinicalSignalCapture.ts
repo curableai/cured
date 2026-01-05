@@ -127,6 +127,9 @@ export interface TrendData {
 
 class SignalCaptureService {
     private db = supabase;
+    
+    // Regex pattern for validating numeric strings
+    private static readonly NUMERIC_PATTERN = /^-?\d+(\.\d+)?$/;
 
     // --------------------------------------------------------------------------
     // CAPTURE SIGNAL
@@ -548,7 +551,10 @@ class SignalCaptureService {
 
     private sanitizeText(text: string): string {
         // Basic sanitization for health data text fields
-        // Removes potentially dangerous HTML/script characters
+        // Removes potentially dangerous HTML/script characters including:
+        // - HTML metacharacters: < > " ' `
+        // - Protocol handlers: javascript:, data:
+        // - Event handlers: onclick=, onload=, etc.
         // IMPORTANT: This is basic protection. For production use with user-generated
         // content displayed in web views, use a dedicated library like:
         // - DOMPurify (client-side): https://github.com/cure53/DOMPurify
@@ -556,7 +562,7 @@ class SignalCaptureService {
         if (!text || typeof text !== 'string') return '';
         
         return text
-            .replace(/[<>\"'`]/g, '') // Remove HTML/script metacharacters
+            .replace(/[<>\"'`]/g, '') // Remove HTML/script metacharacters and backticks
             .replace(/javascript:/gi, '') // Remove javascript: protocol
             .replace(/data:/gi, '') // Remove data: protocol
             .replace(/on\w+\s*=/gi, '') // Remove event handlers like onclick=, onload=
@@ -625,7 +631,7 @@ class SignalCaptureService {
                 val = true;
             } else if (trimmed === 'false' || trimmed === '0') {
                 val = false;
-            } else if (trimmed.length > 0 && /^-?\d+(\.\d+)?$/.test(trimmed)) {
+            } else if (trimmed.length > 0 && SignalCaptureService.NUMERIC_PATTERN.test(trimmed)) {
                 // Only parse if string matches valid numeric pattern (includes optional decimal)
                 const parsed = parseFloat(trimmed);
                 if (!isNaN(parsed) && isFinite(parsed)) {
@@ -669,7 +675,7 @@ class SignalCaptureService {
                 val = true;
             } else if (trimmed === 'false' || trimmed === '0') {
                 val = false;
-            } else if (trimmed.length > 0 && /^-?\d+(\.\d+)?$/.test(trimmed)) {
+            } else if (trimmed.length > 0 && SignalCaptureService.NUMERIC_PATTERN.test(trimmed)) {
                 // Only parse if string matches valid numeric pattern (includes optional decimal)
                 const parsed = parseFloat(trimmed);
                 if (!isNaN(parsed) && isFinite(parsed)) {
