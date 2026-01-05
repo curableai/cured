@@ -23,6 +23,11 @@ export type { SignalContext, SignalSource };
 export type SafetyAlertLevel = 'normal' | 'caution' | 'extreme';
 export type ProposalStatus = 'pending' | 'confirmed' | 'rejected' | 'edited';
 
+// Time constants for validation
+const MILLISECONDS_IN_HOUR = 60 * 60 * 1000;
+const MILLISECONDS_IN_DAY = 24 * MILLISECONDS_IN_HOUR;
+const MILLISECONDS_IN_YEAR = 365 * MILLISECONDS_IN_DAY;
+
 export const SOURCE_CONFIDENCE: Record<SignalSource, number> = {
     device_healthkit: 0.95,
     device_health_connect: 0.95,
@@ -143,8 +148,8 @@ class SignalCaptureService {
             if (params.capturedAt) {
                 const capturedTime = new Date(params.capturedAt).getTime();
                 const now = Date.now();
-                const oneYearAgo = now - (365 * 24 * 60 * 60 * 1000);
-                const oneHourFuture = now + (60 * 60 * 1000);
+                const oneYearAgo = now - MILLISECONDS_IN_YEAR;
+                const oneHourFuture = now + MILLISECONDS_IN_HOUR;
                 
                 if (isNaN(capturedTime) || capturedTime < oneYearAgo || capturedTime > oneHourFuture) {
                     return { success: false, error: 'Invalid timestamp' };
@@ -544,14 +549,18 @@ class SignalCaptureService {
     private sanitizeText(text: string): string {
         // Basic sanitization for health data text fields
         // Removes potentially dangerous HTML/script characters
-        // Note: For production, consider using a dedicated sanitization library
-        // like DOMPurify for client-side or sanitize-html for server-side
+        // IMPORTANT: This is basic protection. For production use with user-generated
+        // content displayed in web views, use a dedicated library like:
+        // - DOMPurify (client-side): https://github.com/cure53/DOMPurify
+        // - sanitize-html (server-side): https://github.com/apostrophecms/sanitize-html
         if (!text || typeof text !== 'string') return '';
         
         return text
             .replace(/[<>\"'`]/g, '') // Remove HTML/script metacharacters
             .replace(/javascript:/gi, '') // Remove javascript: protocol
-            .replace(/on\w+=/gi, '') // Remove event handlers like onclick=
+            .replace(/data:/gi, '') // Remove data: protocol
+            .replace(/on\w+\s*=/gi, '') // Remove event handlers like onclick=, onload=
+            .replace(/on\w+\s+/gi, '') // Remove event handlers without =
             .substring(0, 10000); // Limit length to prevent DoS
     }
 
@@ -616,8 +625,8 @@ class SignalCaptureService {
                 val = true;
             } else if (trimmed === 'false' || trimmed === '0') {
                 val = false;
-            } else if (trimmed.length > 0 && /^-?\d+\.?\d*$/.test(trimmed)) {
-                // Only parse if string matches numeric pattern
+            } else if (trimmed.length > 0 && /^-?\d+(\.\d+)?$/.test(trimmed)) {
+                // Only parse if string matches valid numeric pattern (includes optional decimal)
                 const parsed = parseFloat(trimmed);
                 if (!isNaN(parsed) && isFinite(parsed)) {
                     val = parsed;
@@ -660,8 +669,8 @@ class SignalCaptureService {
                 val = true;
             } else if (trimmed === 'false' || trimmed === '0') {
                 val = false;
-            } else if (trimmed.length > 0 && /^-?\d+\.?\d*$/.test(trimmed)) {
-                // Only parse if string matches numeric pattern
+            } else if (trimmed.length > 0 && /^-?\d+(\.\d+)?$/.test(trimmed)) {
+                // Only parse if string matches valid numeric pattern (includes optional decimal)
                 const parsed = parseFloat(trimmed);
                 if (!isNaN(parsed) && isFinite(parsed)) {
                     val = parsed;
