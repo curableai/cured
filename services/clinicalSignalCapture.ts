@@ -122,7 +122,7 @@ export interface TrendData {
     changePercent?: number;
     trueCount?: number;
     falseCount?: number;
-    frequency?: number | undefined;
+    frequency?: number;
 }
 
 class SignalCaptureService {
@@ -533,13 +533,13 @@ class SignalCaptureService {
         if (context.location_type && ['home', 'work', 'school', 'hospital', 'outdoors', 'transit'].includes(context.location_type)) {
             sanitized.location_type = context.location_type;
         }
-        if (context.pregnancy_trimester && [1, 2, 3].includes(context.pregnancy_trimester)) {
+        if (context.pregnancy_trimester !== undefined && [1, 2, 3].includes(context.pregnancy_trimester)) {
             sanitized.pregnancy_trimester = context.pregnancy_trimester;
         }
         if (context.fasting !== undefined && typeof context.fasting === 'boolean') {
             sanitized.fasting = context.fasting;
         }
-        if (context.cycle_day !== undefined && typeof context.cycle_day === 'number' && context.cycle_day >= 1 && context.cycle_day <= 40) {
+        if (context.cycle_day !== undefined && typeof context.cycle_day === 'number' && Number.isInteger(context.cycle_day) && context.cycle_day >= 1 && context.cycle_day <= 40) {
             sanitized.cycle_day = context.cycle_day;
         }
         if (context.notes && typeof context.notes === 'string') {
@@ -553,8 +553,8 @@ class SignalCaptureService {
         // Basic sanitization for health data text fields
         // Removes potentially dangerous HTML/script characters including:
         // - HTML metacharacters: < > " ' `
-        // - Protocol handlers: javascript:, data:
-        // - Event handlers: onclick=, onload=, etc.
+        // - Protocol handlers: javascript:, data:, vbscript:
+        // - Event handlers: onclick, onload, etc.
         // IMPORTANT: This is basic protection. For production use with user-generated
         // content displayed in web views, use a dedicated library like:
         // - DOMPurify (client-side): https://github.com/cure53/DOMPurify
@@ -564,9 +564,10 @@ class SignalCaptureService {
         return text
             .replace(/[<>\"'`]/g, '') // Remove HTML/script metacharacters and backticks
             .replace(/javascript:/gi, '') // Remove javascript: protocol
+            .replace(/vbscript:/gi, '') // Remove vbscript: protocol
             .replace(/data:/gi, '') // Remove data: protocol
-            .replace(/on\w+\s*=/gi, '') // Remove event handlers like onclick=, onload=
-            .replace(/on\w+\s+/gi, '') // Remove event handlers without =
+            .replace(/\son\w+\s*=/gi, ' ') // Remove event handlers like " onclick=", " onload="
+            .replace(/^on\w+\s*=/gi, '') // Remove event handlers at start of string
             .substring(0, 10000); // Limit length to prevent DoS
     }
 
@@ -634,7 +635,8 @@ class SignalCaptureService {
             } else if (trimmed.length > 0 && SignalCaptureService.NUMERIC_PATTERN.test(trimmed)) {
                 // Only parse if string matches valid numeric pattern (includes optional decimal)
                 const parsed = parseFloat(trimmed);
-                if (!isNaN(parsed) && isFinite(parsed)) {
+                // Validate range to prevent precision issues and overflow
+                if (!isNaN(parsed) && isFinite(parsed) && Math.abs(parsed) <= Number.MAX_SAFE_INTEGER) {
                     val = parsed;
                 }
             }
@@ -678,7 +680,8 @@ class SignalCaptureService {
             } else if (trimmed.length > 0 && SignalCaptureService.NUMERIC_PATTERN.test(trimmed)) {
                 // Only parse if string matches valid numeric pattern (includes optional decimal)
                 const parsed = parseFloat(trimmed);
-                if (!isNaN(parsed) && isFinite(parsed)) {
+                // Validate range to prevent precision issues and overflow
+                if (!isNaN(parsed) && isFinite(parsed) && Math.abs(parsed) <= Number.MAX_SAFE_INTEGER) {
                     val = parsed;
                 }
             }
