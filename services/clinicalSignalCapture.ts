@@ -117,7 +117,7 @@ export interface TrendData {
     changePercent?: number;
     trueCount?: number;
     falseCount?: number;
-    frequency?: number;
+    frequency?: number | undefined;
 }
 
 class SignalCaptureService {
@@ -327,7 +327,7 @@ class SignalCaptureService {
                 const trueCount = boolValues.filter(h => h.value === true).length;
                 trendData.trueCount = trueCount;
                 trendData.falseCount = boolValues.length - trueCount;
-                trendData.frequency = boolValues.length > 0 ? trueCount / boolValues.length : 0;
+                trendData.frequency = boolValues.length > 0 ? trueCount / boolValues.length : undefined;
             }
 
             return trendData;
@@ -349,7 +349,10 @@ class SignalCaptureService {
         extractionMethod?: string
     ): Promise<AISignalProposal | null> {
         // Strengthen validation: AI confidence should be high enough to be useful
-        if (aiConfidence < 0.3 || aiConfidence > 1) {
+        // Threshold of 0.3 chosen to filter out low-quality extractions while
+        // allowing moderate-confidence signals that users can review and confirm
+        const MIN_AI_CONFIDENCE = 0.3;
+        if (aiConfidence < MIN_AI_CONFIDENCE || aiConfidence > 1) {
             console.error('Invalid AI confidence score');
             return null;
         }
@@ -539,10 +542,16 @@ class SignalCaptureService {
     }
 
     private sanitizeText(text: string): string {
-        // Prevent XSS by removing potentially dangerous characters
-        // This is a basic sanitization - in production, use a proper sanitization library
+        // Basic sanitization for health data text fields
+        // Removes potentially dangerous HTML/script characters
+        // Note: For production, consider using a dedicated sanitization library
+        // like DOMPurify for client-side or sanitize-html for server-side
+        if (!text || typeof text !== 'string') return '';
+        
         return text
-            .replace(/[<>\"']/g, '')
+            .replace(/[<>\"'`]/g, '') // Remove HTML/script metacharacters
+            .replace(/javascript:/gi, '') // Remove javascript: protocol
+            .replace(/on\w+=/gi, '') // Remove event handlers like onclick=
             .substring(0, 10000); // Limit length to prevent DoS
     }
 
@@ -600,14 +609,19 @@ class SignalCaptureService {
         // Secure deserialization with type checking
         let val: any = row.value;
         
-        // Only convert if the value is actually a string representation of boolean
+        // Only convert if the value is actually a string representation of boolean or number
         if (typeof row.value === 'string') {
-            if (row.value === 'true' || row.value === '1') {
+            const trimmed = row.value.trim();
+            if (trimmed === 'true' || trimmed === '1') {
                 val = true;
-            } else if (row.value === 'false' || row.value === '0') {
+            } else if (trimmed === 'false' || trimmed === '0') {
                 val = false;
-            } else if (!isNaN(Number(row.value))) {
-                val = Number(row.value);
+            } else if (trimmed.length > 0 && /^-?\d+\.?\d*$/.test(trimmed)) {
+                // Only parse if string matches numeric pattern
+                const parsed = parseFloat(trimmed);
+                if (!isNaN(parsed) && isFinite(parsed)) {
+                    val = parsed;
+                }
             }
         } else if (typeof row.value === 'number') {
             // If value is 0 or 1, check if it should be boolean based on signal definition
@@ -625,7 +639,7 @@ class SignalCaptureService {
             confidence: row.confidence,
             capturedAt: row.captured_at,
             createdBy: row.created_by,
-            context: row.context || {},
+            context: row.context ? this.sanitizeContext(row.context) : {},
             safetyAlertLevel: row.safety_alert_level as SafetyAlertLevel,
             requiresConfirmation: row.requires_confirmation,
             aiProposalId: row.ai_proposal_id,
@@ -641,12 +655,17 @@ class SignalCaptureService {
         let val: any = row.proposed_value;
         
         if (typeof row.proposed_value === 'string') {
-            if (row.proposed_value === 'true' || row.proposed_value === '1') {
+            const trimmed = row.proposed_value.trim();
+            if (trimmed === 'true' || trimmed === '1') {
                 val = true;
-            } else if (row.proposed_value === 'false' || row.proposed_value === '0') {
+            } else if (trimmed === 'false' || trimmed === '0') {
                 val = false;
-            } else if (!isNaN(Number(row.proposed_value))) {
-                val = Number(row.proposed_value);
+            } else if (trimmed.length > 0 && /^-?\d+\.?\d*$/.test(trimmed)) {
+                // Only parse if string matches numeric pattern
+                const parsed = parseFloat(trimmed);
+                if (!isNaN(parsed) && isFinite(parsed)) {
+                    val = parsed;
+                }
             }
         }
 
