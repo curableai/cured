@@ -139,6 +139,18 @@ class SignalCaptureService {
                 return { success: false, error: `Source '${params.source}' not allowed for ${signalDef.name}` };
             }
 
+            // Validate capturedAt timestamp to prevent backdating attacks
+            if (params.capturedAt) {
+                const capturedTime = new Date(params.capturedAt).getTime();
+                const now = Date.now();
+                const oneYearAgo = now - (365 * 24 * 60 * 60 * 1000);
+                const oneHourFuture = now + (60 * 60 * 1000);
+                
+                if (isNaN(capturedTime) || capturedTime < oneYearAgo || capturedTime > oneHourFuture) {
+                    return { success: false, error: 'Invalid timestamp' };
+                }
+            }
+
             // Unit Validation & Defaulting
             let captureUnit = params.unit;
             if (signalDef.valueType === 'numeric' && typeof params.value === 'number') {
@@ -167,6 +179,9 @@ class SignalCaptureService {
             const now = new Date().toISOString();
             const newInstanceId = Crypto.randomUUID();
 
+            // Validate and sanitize context object
+            const sanitizedContext = this.sanitizeContext(params.context);
+
             // Handle Longitudinal vs Single-Point Logic
             // Signal ordering relies on captured_at (DB schema doesn't have is_active)
 
@@ -182,7 +197,7 @@ class SignalCaptureService {
                     confidence,
                     captured_at: params.capturedAt ?? now,
                     created_by: 'user',
-                    context: params.context ?? {},
+                    context: sanitizedContext,
                     safety_alert_level: safetyCheck.level,
                     requires_confirmation: safetyCheck.level === 'extreme',
                     ai_proposal_id: params.aiProposalId ?? null,
@@ -192,7 +207,10 @@ class SignalCaptureService {
                 .select()
                 .single();
 
-            if (error) return { success: false, error: error.message };
+            if (error) {
+                console.error('Database error capturing signal');
+                return { success: false, error: 'Failed to save signal' };
+            }
 
             // Auto-confirm AI proposal if linked
             if (params.aiProposalId) await this.confirmProposal(params.aiProposalId, params.value, params.unit);
@@ -203,7 +221,8 @@ class SignalCaptureService {
                 warning: safetyCheck.level !== 'normal' ? safetyCheck.message : undefined,
             };
         } catch (err) {
-            return { success: false, error: err instanceof Error ? err.message : 'Failed to capture signal' };
+            console.error('Unexpected error capturing signal');
+            return { success: false, error: 'Failed to capture signal' };
         }
     }
 
@@ -211,12 +230,22 @@ class SignalCaptureService {
     // GET LATEST ACTIVE SIGNAL
     // --------------------------------------------------------------------------
     async getSignalHistory(userId: string, signalId: string | 'all', limit: number = 30): Promise<SignalInstance[]> {
+        // Validate and sanitize limit to prevent resource exhaustion
+        const sanitizedLimit = Math.min(Math.max(1, Math.floor(limit)), 100);
+        
+        // Verify authenticated user can only access their own data
+        const { data: { user }, error: authError } = await this.db.auth.getUser();
+        if (authError || !user || user.id !== userId) {
+            console.error('Unauthorized access attempt to signal history');
+            return [];
+        }
+
         let query = supabase
             .from('signal_instances')
             .select('*')
             .eq('user_id', userId)
             .order('captured_at', { ascending: false })
-            .limit(limit);
+            .limit(sanitizedLimit);
 
         if (signalId !== 'all') {
             query = query.eq('signal_id', signalId);
@@ -225,7 +254,7 @@ class SignalCaptureService {
         const { data, error } = await query;
 
         if (error) {
-            console.error('Error fetching signal history:', error);
+            console.error('Error fetching signal history');
             return [];
         }
 
@@ -234,6 +263,13 @@ class SignalCaptureService {
 
     async getLatestSignal(userId: string, signalId: string): Promise<SignalInstance | null> {
         try {
+            // Verify authenticated user can only access their own data
+            const { data: { user }, error: authError } = await this.db.auth.getUser();
+            if (authError || !user || user.id !== userId) {
+                console.error('Unauthorized access attempt to latest signal');
+                return null;
+            }
+
             const { data, error } = await this.db.from('signal_instances')
                 .select('*')
                 .eq('user_id', userId)
@@ -255,7 +291,10 @@ class SignalCaptureService {
     // --------------------------------------------------------------------------
     async computeTrend(userId: string, signalId: string, days: number = 30): Promise<TrendData | null> {
         try {
-            const history = await this.getSignalHistory(userId, signalId, days);
+            // Validate and sanitize days to prevent resource exhaustion
+            const sanitizedDays = Math.min(Math.max(1, Math.floor(days)), 365);
+            
+            const history = await this.getSignalHistory(userId, signalId, sanitizedDays);
             if (history.length < 2) return null;
 
             const signalDef = await this.getSignalDefinition(signalId);
@@ -267,7 +306,7 @@ class SignalCaptureService {
             const trendData: TrendData = {
                 signalId,
                 dataPoints: history.map(h => ({ value: h.value, capturedAt: h.capturedAt, confidence: h.confidence })),
-                days,
+                days: sanitizedDays,
                 lastUpdatedHoursAgo: Math.round(hoursAgo),
             };
 
@@ -288,7 +327,7 @@ class SignalCaptureService {
                 const trueCount = boolValues.filter(h => h.value === true).length;
                 trendData.trueCount = trueCount;
                 trendData.falseCount = boolValues.length - trueCount;
-                trendData.frequency = trueCount / boolValues.length;
+                trendData.frequency = boolValues.length > 0 ? trueCount / boolValues.length : 0;
             }
 
             return trendData;
@@ -309,9 +348,37 @@ class SignalCaptureService {
         aiConfidence: number,
         extractionMethod?: string
     ): Promise<AISignalProposal | null> {
-        if (aiConfidence < 0 || aiConfidence > 1) return null;
+        // Strengthen validation: AI confidence should be high enough to be useful
+        if (aiConfidence < 0.3 || aiConfidence > 1) {
+            console.error('Invalid AI confidence score');
+            return null;
+        }
 
         try {
+            // Verify authenticated user
+            const { data: { user }, error: authError } = await this.db.auth.getUser();
+            if (authError || !user || user.id !== userId) {
+                console.error('Unauthorized proposal creation attempt');
+                return null;
+            }
+
+            // Validate signal exists
+            const signalDef = await this.getSignalDefinition(signalId);
+            if (!signalDef) {
+                console.error('Invalid signal ID for proposal');
+                return null;
+            }
+
+            // Validate the proposed value against signal definition
+            const validationError = this.validateValue(proposedValue, signalDef);
+            if (validationError) {
+                console.error('Proposal value validation failed');
+                return null;
+            }
+
+            // Sanitize extractedFrom to prevent XSS in UI
+            const sanitizedExtractedFrom = this.sanitizeText(extractedFrom);
+
             const now = new Date().toISOString();
             const { data, error } = await this.db.from('ai_signal_proposals')
                 .insert({
@@ -320,7 +387,7 @@ class SignalCaptureService {
                     signal_id: signalId,
                     proposed_value: this.serializeValue(proposedValue),
                     proposed_unit: proposedUnit ?? null,
-                    extracted_from: extractedFrom,
+                    extracted_from: sanitizedExtractedFrom,
                     extraction_method: extractionMethod ?? null,
                     ai_confidence: aiConfidence,
                     status: 'pending',
@@ -330,7 +397,10 @@ class SignalCaptureService {
                 .select()
                 .single();
 
-            if (error) return null;
+            if (error) {
+                console.error('Database error creating proposal');
+                return null;
+            }
             return this.mapToProposal(data);
         } catch {
             return null;
@@ -339,9 +409,40 @@ class SignalCaptureService {
 
     async confirmProposal(proposalId: string, finalValue?: number | boolean | string, finalUnit?: string): Promise<boolean> {
         try {
+            // Verify authenticated user owns this proposal
+            const { data: { user }, error: authError } = await this.db.auth.getUser();
+            if (authError || !user) {
+                console.error('Unauthorized proposal confirmation attempt');
+                return false;
+            }
+
+            // Check user owns the proposal
+            const { data: proposal, error: fetchError } = await this.db.from('ai_signal_proposals')
+                .select('user_id, signal_id, proposed_value')
+                .eq('id', proposalId)
+                .single();
+
+            if (fetchError || !proposal || proposal.user_id !== user.id) {
+                console.error('Proposal not found or unauthorized');
+                return false;
+            }
+
+            // If finalValue is provided, validate it
+            if (finalValue !== undefined) {
+                const signalDef = await this.getSignalDefinition(proposal.signal_id);
+                if (signalDef) {
+                    const validationError = this.validateValue(finalValue, signalDef);
+                    if (validationError) {
+                        console.error('Final value validation failed');
+                        return false;
+                    }
+                }
+            }
+
             const { error } = await this.db.from('ai_signal_proposals')
                 .update({ status: 'confirmed', resolved_at: new Date().toISOString(), final_value: finalValue ? this.serializeValue(finalValue) : null, final_unit: finalUnit ?? null })
-                .eq('id', proposalId);
+                .eq('id', proposalId)
+                .eq('user_id', user.id); // Double-check ownership
             return !error;
         } catch {
             return false;
@@ -350,9 +451,18 @@ class SignalCaptureService {
 
     async rejectProposal(proposalId: string): Promise<boolean> {
         try {
+            // Verify authenticated user owns this proposal
+            const { data: { user }, error: authError } = await this.db.auth.getUser();
+            if (authError || !user) {
+                console.error('Unauthorized proposal rejection attempt');
+                return false;
+            }
+
+            // Verify ownership before rejecting
             const { error } = await this.db.from('ai_signal_proposals')
                 .update({ status: 'rejected', resolved_at: new Date().toISOString() })
-                .eq('id', proposalId);
+                .eq('id', proposalId)
+                .eq('user_id', user.id);
             return !error;
         } catch {
             return false;
@@ -361,11 +471,19 @@ class SignalCaptureService {
 
     async getPendingProposals(userId: string): Promise<AISignalProposal[]> {
         try {
+            // Verify authenticated user can only access their own proposals
+            const { data: { user }, error: authError } = await this.db.auth.getUser();
+            if (authError || !user || user.id !== userId) {
+                console.error('Unauthorized access to pending proposals');
+                return [];
+            }
+
             const { data, error } = await this.db.from('ai_signal_proposals')
                 .select('*')
                 .eq('user_id', userId)
                 .eq('status', 'pending')
-                .order('created_at', { ascending: false });
+                .order('created_at', { ascending: false })
+                .limit(100); // Prevent unbounded result set
             return (data ?? []).map(row => this.mapToProposal(row));
         } catch {
             return [];
@@ -388,6 +506,46 @@ class SignalCaptureService {
     // --------------------------------------------------------------------------
     // PRIVATE HELPERS
     // --------------------------------------------------------------------------
+    private sanitizeContext(context?: SignalContext): SignalContext {
+        if (!context) return {};
+        
+        // Create a safe copy of context with validated fields
+        const sanitized: SignalContext = {};
+        
+        // Only copy known safe fields from SignalContext
+        if (context.activity_state && ['resting', 'active', 'post_exercise', 'sleeping'].includes(context.activity_state)) {
+            sanitized.activity_state = context.activity_state;
+        }
+        if (context.time_of_day && ['morning', 'afternoon', 'evening', 'night'].includes(context.time_of_day)) {
+            sanitized.time_of_day = context.time_of_day;
+        }
+        if (context.location_type && ['home', 'work', 'school', 'hospital', 'outdoors', 'transit'].includes(context.location_type)) {
+            sanitized.location_type = context.location_type;
+        }
+        if (context.pregnancy_trimester && [1, 2, 3].includes(context.pregnancy_trimester)) {
+            sanitized.pregnancy_trimester = context.pregnancy_trimester;
+        }
+        if (context.fasting !== undefined && typeof context.fasting === 'boolean') {
+            sanitized.fasting = context.fasting;
+        }
+        if (context.cycle_day !== undefined && typeof context.cycle_day === 'number' && context.cycle_day >= 1 && context.cycle_day <= 40) {
+            sanitized.cycle_day = context.cycle_day;
+        }
+        if (context.notes && typeof context.notes === 'string') {
+            sanitized.notes = this.sanitizeText(context.notes);
+        }
+        
+        return sanitized;
+    }
+
+    private sanitizeText(text: string): string {
+        // Prevent XSS by removing potentially dangerous characters
+        // This is a basic sanitization - in production, use a proper sanitization library
+        return text
+            .replace(/[<>\"']/g, '')
+            .substring(0, 10000); // Limit length to prevent DoS
+    }
+
     private mapToServiceDefinition(raw: SchemaSignalDefinition): SignalDefinition {
         return {
             signalId: raw.id,
@@ -439,10 +597,23 @@ class SignalCaptureService {
     }
 
     private mapToSignalInstance(row: any): SignalInstance {
+        // Secure deserialization with type checking
         let val: any = row.value;
-        // Basic deserialization (if Supabase returns different types)
-        if (row.value === 'true') val = true;
-        if (row.value === 'false') val = false;
+        
+        // Only convert if the value is actually a string representation of boolean
+        if (typeof row.value === 'string') {
+            if (row.value === 'true' || row.value === '1') {
+                val = true;
+            } else if (row.value === 'false' || row.value === '0') {
+                val = false;
+            } else if (!isNaN(Number(row.value))) {
+                val = Number(row.value);
+            }
+        } else if (typeof row.value === 'number') {
+            // If value is 0 or 1, check if it should be boolean based on signal definition
+            // For now, keep as is unless explicitly needed
+            val = row.value;
+        }
 
         return {
             id: row.id,
@@ -454,7 +625,7 @@ class SignalCaptureService {
             confidence: row.confidence,
             capturedAt: row.captured_at,
             createdBy: row.created_by,
-            context: row.context,
+            context: row.context || {},
             safetyAlertLevel: row.safety_alert_level as SafetyAlertLevel,
             requiresConfirmation: row.requires_confirmation,
             aiProposalId: row.ai_proposal_id,
@@ -466,9 +637,18 @@ class SignalCaptureService {
     }
 
     private mapToProposal(row: any): AISignalProposal {
+        // Secure deserialization with type checking
         let val: any = row.proposed_value;
-        if (row.proposed_value === 'true') val = true;
-        if (row.proposed_value === 'false') val = false;
+        
+        if (typeof row.proposed_value === 'string') {
+            if (row.proposed_value === 'true' || row.proposed_value === '1') {
+                val = true;
+            } else if (row.proposed_value === 'false' || row.proposed_value === '0') {
+                val = false;
+            } else if (!isNaN(Number(row.proposed_value))) {
+                val = Number(row.proposed_value);
+            }
+        }
 
         return {
             id: row.id,
