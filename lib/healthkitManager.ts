@@ -1,17 +1,30 @@
-// lib/healthKitManager.ts
 import { supabase } from '@/lib/supabaseClient';
+import { clinicalSignalService } from '@/services/clinicalSignalCapture';
+import Constants from 'expo-constants';
 import { Alert, Platform } from 'react-native';
 import { secureStoreService } from './secureStoreService';
+
+// Only import native HealthKit if we're not in Expo Go and on iOS
+let HealthKit: any = null;
+if (Platform.OS === 'ios' && Constants.appOwnership !== 'expo') {
+  try {
+    HealthKit = require('@kingstinct/react-native-healthkit').default;
+  } catch (e) {
+    console.warn('HealthKit module not found. Real data will not be available.');
+  }
+}
 
 const HEALTHKIT_PERMISSION_PREFIX = 'healthkit_permission_';
 
 export interface HealthData {
   steps: number;
   heartRate: number;
+  heartRateVariability: number;
+  restingHeartRate: number;
+  bloodOxygen: number;
+  headphoneAudioLevel: number;
   sleepHours: number;
-  bloodPressure: string;
-  bloodOxygen?: number;
-  activeEnergyBurned?: number;
+  activeEnergyBurned: number;
   lastUpdated: string;
 }
 
@@ -114,39 +127,35 @@ const requestHealthKitPermissionsNative = async (): Promise<boolean> => {
   try {
     console.log('Requesting HealthKit permissions...');
 
-    // TODO: Replace with actual HealthKit permission request
-    // Example using react-native-health or @kingstinct/react-native-healthkit:
-    // 
-    // import AppleHealthKit from 'react-native-health';
-    // 
-    // const permissions = {
-    //   permissions: {
-    //     read: [
-    //       AppleHealthKit.Constants.Permissions.StepCount,
-    //       AppleHealthKit.Constants.Permissions.HeartRate,
-    //       AppleHealthKit.Constants.Permissions.SleepAnalysis,
-    //       AppleHealthKit.Constants.Permissions.BloodPressureSystolic,
-    //       AppleHealthKit.Constants.Permissions.BloodPressureDiastolic,
-    //       AppleHealthKit.Constants.Permissions.ActiveEnergyBurned,
-    //     ],
-    //     write: [],
-    //   },
-    // };
-    // 
-    // return new Promise((resolve) => {
-    //   AppleHealthKit.initHealthKit(permissions, (error) => {
-    //     if (error) {
-    //       console.error('HealthKit init error:', error);
-    //       resolve(false);
-    //       return;
-    //     }
-    //     console.log('HealthKit initialized successfully');
-    //     resolve(true);
-    //   });
-    // });
+    if (!HealthKit) {
+      console.warn('HealthKit is not available in Expo Go. Real data requires a Development Build.');
+      Alert.alert(
+        'Real Data Unavailable',
+        'Accessing real Apple Watch data requires a Development Build. You are currently using Expo Go, which does not support native HealthKit access.\n\nTo see real data, you will need to create a build using EAS.',
+        [{ text: 'OK' }]
+      );
+      return false;
+    }
 
-    // Simulate permission request for now
-    console.log('HealthKit permissions granted (simulated)');
+    const isAvailable = await HealthKit.isHealthDataAvailable();
+    if (!isAvailable) {
+      console.log('HealthKit not available on this device');
+      return false;
+    }
+
+    const permissions = [
+      'HKQuantityTypeIdentifierStepCount',
+      'HKQuantityTypeIdentifierHeartRate',
+      'HKQuantityTypeIdentifierHeartRateVariabilitySDNN',
+      'HKQuantityTypeIdentifierRestingHeartRate',
+      'HKQuantityTypeIdentifierOxygenSaturation',
+      'HKQuantityTypeIdentifierHeadphoneAudioExposure',
+      'HKQuantityTypeIdentifierActiveEnergyBurned',
+      'HKCategoryTypeIdentifierSleepAnalysis',
+    ];
+
+    const status = await HealthKit.requestAuthorization(permissions as any, []);
+    console.log('HealthKit authorization status:', status);
     return true;
   } catch (error) {
     console.error('Native HealthKit permission request failed:', error);
@@ -158,15 +167,12 @@ const requestHealthKitPermissionsNative = async (): Promise<boolean> => {
  * Check if HealthKit is available on this device
  */
 export const isHealthKitAvailable = async (): Promise<boolean> => {
-  if (Platform.OS !== 'ios') {
+  if (Platform.OS !== 'ios' || !HealthKit || Constants.appOwnership === 'expo') {
     return false;
   }
 
   try {
-    // TODO: Replace with actual HealthKit availability check
-    // Example:
-    // return await AppleHealthKit.isAvailable();
-    return true;
+    return await HealthKit.isHealthDataAvailable();
   } catch (error) {
     console.error('HealthKit availability check failed:', error);
     return false;
@@ -177,39 +183,77 @@ export const isHealthKitAvailable = async (): Promise<boolean> => {
  * Fetch health data from HealthKit
  */
 export const fetchHealthData = async (): Promise<HealthData | null> => {
-  if (Platform.OS !== 'ios') {
-    console.log('HealthKit only available on iOS');
+  if (Platform.OS !== 'ios' || !HealthKit || Constants.appOwnership === 'expo') {
     return null;
   }
 
   try {
     console.log('Fetching HealthKit data...');
+    const now = new Date();
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
 
-    // TODO: Replace with actual HealthKit data fetching
-    // Example:
-    // const options = {
-    //   startDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-    //   endDate: new Date().toISOString(),
-    // };
-    // 
-    // const [steps, heartRate, sleep] = await Promise.all([
-    //   AppleHealthKit.getStepCount(options),
-    //   AppleHealthKit.getHeartRateSamples(options),
-    //   AppleHealthKit.getSleepSamples(options),
-    // ]);
+    // Fetch metrics in parallel using string identifiers
+    const [
+      steps,
+      heartRate,
+      hrv,
+      restingHR,
+      bloodOxygen,
+      audioLevel,
+      sleep,
+      energy
+    ] = await Promise.all([
+      HealthKit.queryQuantitySamples('HKQuantityTypeIdentifierStepCount' as any, { limit: 1000 }),
+      HealthKit.queryQuantitySamples('HKQuantityTypeIdentifierHeartRate' as any, { limit: 1 }),
+      HealthKit.queryQuantitySamples('HKQuantityTypeIdentifierHeartRateVariabilitySDNN' as any, { limit: 1 }),
+      HealthKit.queryQuantitySamples('HKQuantityTypeIdentifierRestingHeartRate' as any, { limit: 1 }),
+      HealthKit.queryQuantitySamples('HKQuantityTypeIdentifierOxygenSaturation' as any, { limit: 1 }),
+      HealthKit.queryQuantitySamples('HKQuantityTypeIdentifierHeadphoneAudioExposure' as any, { limit: 1 }),
+      HealthKit.queryCategorySamples('HKCategoryTypeIdentifierSleepAnalysis' as any, { limit: 100 }),
+      HealthKit.queryQuantitySamples('HKQuantityTypeIdentifierActiveEnergyBurned' as any, { limit: 1000 }),
+    ]);
 
-    // Simulated data for now
-    const mockHealthData: HealthData = {
-      steps: Math.floor(Math.random() * 5000) + 5000,
-      heartRate: Math.floor(Math.random() * 20) + 60,
-      sleepHours: Math.random() * 3 + 6,
-      bloodPressure: '120/80',
-      activeEnergyBurned: Math.floor(Math.random() * 300) + 200,
-      lastUpdated: new Date().toISOString(),
+    // Aggregate values (filter by today manually for more reliability)
+    const totalSteps = (steps as any[])
+      .filter((s: any) => new Date(s.startDate) >= startOfDay)
+      .reduce((sum: number, s: any) => sum + s.quantity, 0);
+
+    const latestHR = (heartRate as any[])[0]?.quantity || 0;
+    const latestHRV = (hrv as any[])[0]?.quantity || 0;
+    const latestRestingHR = (restingHR as any[])[0]?.quantity || 0;
+    const latestOxygen = ((bloodOxygen as any[])[0]?.quantity || 0) * 100;
+    const latestAudio = (audioLevel as any[])[0]?.quantity || 0;
+
+    const totalEnergy = (energy as any[])
+      .filter((s: any) => new Date(s.startDate) >= startOfDay)
+      .reduce((sum: number, s: any) => sum + s.quantity, 0);
+
+    // Calculate sleep hours for today
+    let totalSleepMs = 0;
+    (sleep as any[])
+      .filter((s: any) => new Date(s.startDate) >= startOfDay)
+      .forEach((s: any) => {
+        if (s.startDate && s.endDate) {
+          totalSleepMs += new Date(s.endDate).getTime() - new Date(s.startDate).getTime();
+        }
+      });
+    const sleepHours = totalSleepMs / (1000 * 60 * 60);
+
+    const data: HealthData = {
+      steps: totalSteps,
+      heartRate: latestHR,
+      heartRateVariability: latestHRV,
+      restingHeartRate: latestRestingHR,
+      bloodOxygen: latestOxygen,
+      headphoneAudioLevel: latestAudio,
+      sleepHours: sleepHours,
+      activeEnergyBurned: totalEnergy,
+      lastUpdated: now.toISOString(),
     };
 
-    console.log('Health data fetched successfully');
-    return mockHealthData;
+    console.log('Health data fetched successfully:', data);
+    return data;
   } catch (error) {
     console.error('Error fetching health data:', error);
     return null;
@@ -224,27 +268,48 @@ export const uploadHealthData = async (
   healthData: HealthData
 ): Promise<boolean> => {
   try {
-    console.log('Uploading health data for user:', userId);
-    console.log('Health data to upload:', healthData);
+    console.log('Uploading health data as signals:', userId);
 
-    const { data, error } = await supabase.from('health_metrics').insert({
+    const signals = [
+      { id: 'steps_count', value: healthData.steps },
+      { id: 'heart_rate', value: healthData.heartRate },
+      { id: 'heart_rate_variability', value: healthData.heartRateVariability },
+      { id: 'resting_heart_rate', value: healthData.restingHeartRate },
+      { id: 'blood_oxygen', value: healthData.bloodOxygen },
+      { id: 'headphone_audio_level', value: healthData.headphoneAudioLevel },
+      { id: 'sleep_duration', value: healthData.sleepHours },
+      { id: 'physical_activity', value: healthData.activeEnergyBurned > 100 ? 'light' : 'none' }, // Simple mapping for now
+    ];
+
+    const results = await Promise.all(
+      signals.map(s =>
+        clinicalSignalService.captureSignal({
+          signalId: s.id,
+          value: s.value,
+          source: 'device_healthkit',
+          capturedAt: healthData.lastUpdated
+        })
+      )
+    );
+
+    const failed = results.filter(r => !r.success);
+    if (failed.length > 0) {
+      console.warn('Some signals failed to upload:', failed);
+    }
+
+    // Also legacy table support if needed, but we should move to signals
+    const { error: legacyError } = await supabase.from('health_metrics').insert({
       user_id: userId,
       steps: healthData.steps,
       heart_rate: healthData.heartRate,
       sleep_hours: healthData.sleepHours,
-      blood_pressure: healthData.bloodPressure,
       blood_oxygen: healthData.bloodOxygen,
       active_energy_burned: healthData.activeEnergyBurned,
       recorded_at: healthData.lastUpdated,
-      created_at: new Date().toISOString(),
-    }).select();
+    });
 
-    if (error) {
-      console.error('Supabase upload error:', error);
-      return false;
-    }
+    if (legacyError) console.error('Legacy upload error:', legacyError);
 
-    console.log('Health data uploaded successfully:', data);
     return true;
   } catch (error) {
     console.error('Error uploading health data:', error);

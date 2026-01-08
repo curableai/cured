@@ -1,0 +1,266 @@
+/**
+ * lib/aiCheckinService.ts
+ * 
+ * Orchestrates the "AI Oracle" check-in experience.
+ * Instead of fixed questions, it analyzes the user's health state and 
+ * generates the most relevant follow-up stack for today.
+ */
+
+import { supabase } from './supabaseClient';
+
+export interface DynamicQuestion {
+    id: string; // Signal ID
+    pillar: string;
+    question: string;
+    helpText?: string;
+    options: { label: string; value: any }[];
+}
+
+class AICheckinService {
+    /**
+     * Generates a tailored stack of questions for today's check-in.
+     * Context: onboarding, medications, recent signals, previous checkins
+     */
+    async generateDailyStack(userId: string): Promise<DynamicQuestion[]> {
+        try {
+            const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+            
+            if (!OPENAI_API_KEY) {
+                console.warn('OpenAI API key not configured');
+                return this.getFallbackStack();
+            }
+
+            // Fetch user context
+            const context = await this.buildUserContext(userId);
+
+            const prompt = `Generate 4-6 UNIQUE personalized daily health check-in questions based on this user's context:
+
+USER PROFILE:
+- Age: ${context.age || 'Unknown'}
+- Gender: ${context.gender || 'Unknown'}
+- Chronic Conditions: ${context.chronicConditions?.join(', ') || 'None'}
+- Current Medications: ${context.medications?.join(', ') || 'None'}
+
+RECENT HEALTH SIGNALS (Last 7 days):
+${context.recentSignals || 'None recorded'}
+
+PREVIOUS CHECK-IN PATTERNS (Last 3 check-ins):
+${context.previousCheckins || 'No history'}
+
+IMPORTANT RULES:
+1. Questions should be DIFFERENT from previous check-ins shown above
+2. Focus on areas relevant to their conditions and medications
+3. Include follow-ups based on recent signal trends
+4. Make questions conversational and non-medical
+5. Vary the pillars: wellness, energy, sleep, pain, mood, medication adherence, lifestyle
+
+Return ONLY this JSON format:
+{
+  "questions": [
+    {
+      "id": "signal_id_or_unique_id",
+      "pillar": "category",
+      "question": "Natural question text?",
+      "helpText": "optional guidance",
+      "options": [{"label": "Option", "value": "value"}]
+    }
+  ]
+}`;
+
+            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${OPENAI_API_KEY}`
+                },
+                body: JSON.stringify({
+                    model: 'gpt-4o-mini',
+                    messages: [
+                        { role: 'system', content: 'You are a clinical health assistant generating personalized, adaptive check-in questions. Generate UNIQUE questions that adapt to patient context. Return only valid JSON.' },
+                        { role: 'user', content: prompt }
+                    ],
+                    temperature: 0.8, // Higher temp for more variation
+                    response_format: { type: 'json_object' }
+                })
+            });
+
+            if (!response.ok) {
+                console.warn('OpenAI API failed');
+                return this.getFallbackStack();
+            }
+
+            const data = await response.json();
+            const text = data?.choices?.[0]?.message?.content || '{"questions":[]}';
+            const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+            const parsed = JSON.parse(cleaned);
+
+            return parsed?.questions || this.getFallbackStack();
+        } catch (error) {
+            console.error('Error in generateDailyStack:', error);
+            return this.getFallbackStack();
+        }
+    }
+
+    /**
+     * Build contextual user data for AI prompt
+     */
+    private async buildUserContext(userId: string): Promise<any> {
+        try {
+            const context: any = {};
+
+            // 1. Fetch onboarding data
+            const { data: onboarding } = await supabase
+                .from('onboarding')
+                .select('*')
+                .eq('user_id', userId)
+                .single();
+
+            context.age = onboarding?.age;
+            context.gender = onboarding?.gender;
+            context.chronicConditions = onboarding?.chronic_conditions || [];
+
+            // 2. Fetch medications
+            const { data: medications } = await supabase
+                .from('medications')
+                .select('medication_name, dosage, frequency')
+                .eq('user_id', userId);
+
+            context.medications = medications?.map(m => `${m.medication_name} ${m.dosage} ${m.frequency}`) || [];
+
+            // 3. Fetch recent signals (last 7 days)
+            const sevenDaysAgo = new Date();
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+            const { data: signals } = await supabase
+                .from('signal_instances')
+                .select('signal_id, value, unit, captured_at')
+                .eq('user_id', userId)
+                .gte('captured_at', sevenDaysAgo.toISOString())
+                .order('captured_at', { ascending: false })
+                .limit(20);
+
+            if (signals && signals.length > 0) {
+                context.recentSignals = signals
+                    .map(s => `${s.signal_id}: ${s.value} ${s.unit} (${new Date(s.captured_at).toLocaleDateString()})`)
+                    .join('\n');
+            }
+
+            // 4. Fetch previous check-in questions (last 3)
+            const { data: previousCheckins } = await supabase
+                .from('daily_checkins')
+                .select('questions, answers, created_at')
+                .eq('user_id', userId)
+                .order('created_at', { ascending: false })
+                .limit(3);
+
+            if (previousCheckins && previousCheckins.length > 0) {
+                context.previousCheckins = previousCheckins
+                    .map(c => `[${new Date(c.created_at).toLocaleDateString()}] Asked: ${c.questions?.slice(0, 2)?.join(', ')}`)
+                    .join('\n');
+            }
+
+            return context;
+        } catch (error) {
+            console.error('Error building user context:', error);
+            return {};
+        }
+    }
+
+    /**
+     * Scores a completed check-in using OpenAI.
+     */
+    async scoreCheckin(userId: string, answers: any): Promise<{ score: number, feedback: string, insights: string[] }> {
+        try {
+            const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+            
+            if (!OPENAI_API_KEY) {
+                return { score: 0, feedback: "Analysis engine offline. Please try again.", insights: [] };
+            }
+
+            const prompt = `Score this health check-in response: ${JSON.stringify(answers)}
+
+Return ONLY this JSON:
+{
+  "score": 85,
+  "feedback": "Your feedback here",
+  "insights": ["insight1", "insight2"]
+}`;
+
+            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${OPENAI_API_KEY}`
+                },
+                body: JSON.stringify({
+                    model: 'gpt-4o-mini',
+                    messages: [
+                        { role: 'system', content: 'You are a health scoring assistant. Return only valid JSON.' },
+                        { role: 'user', content: prompt }
+                    ],
+                    temperature: 0.5,
+                    response_format: { type: 'json_object' }
+                })
+            });
+
+            if (!response.ok) {
+                return { score: 0, feedback: "Analysis engine offline. Please try again.", insights: [] };
+            }
+
+            const data = await response.json();
+            const text = data?.choices?.[0]?.message?.content || '{"score":0,"feedback":"","insights":[]}';
+            const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+            const parsed = JSON.parse(cleaned);
+
+            return {
+                score: parsed?.score || 0,
+                feedback: parsed?.feedback || '',
+                insights: parsed?.insights || []
+            };
+        } catch (error) {
+            console.error('[AICheckinService] Error scoring check-in:', error);
+            return { score: 0, feedback: "Analysis engine offline. Please try again.", insights: [] };
+        }
+    }
+
+    /**
+     * Fallback to a smart-ish set of core metrics if AI fails.
+     */
+    private getFallbackStack(): DynamicQuestion[] {
+        return [
+            {
+                id: 'general_wellbeing',
+                pillar: 'lifestyle',
+                question: 'Overall, how are you feeling today?',
+                options: [
+                    { label: 'Very good', value: 'very_good' },
+                    { label: 'Okay', value: 'okay' },
+                    { label: 'Not well', value: 'not_well' }
+                ]
+            },
+            {
+                id: 'energy_level',
+                pillar: 'lifestyle',
+                question: 'How is your energy level?',
+                options: [
+                    { label: 'High', value: 'high' },
+                    { label: 'Normal', value: 'normal' },
+                    { label: 'Low', value: 'low' }
+                ]
+            },
+            {
+                id: 'sleep_quality',
+                pillar: 'sleep',
+                question: 'How was your sleep last night?',
+                options: [
+                    { label: 'Excellent', value: 'excellent' },
+                    { label: 'Good', value: 'good' },
+                    { label: 'Fair', value: 'fair' },
+                    { label: 'Poor', value: 'poor' }
+                ]
+            }
+        ];
+    }
+}
+
+export const aiCheckinService = new AICheckinService();

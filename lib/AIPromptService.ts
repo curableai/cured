@@ -115,7 +115,7 @@ class AIPromptService {
     private async analyzeSignalTrends(userId: string): Promise<HealthPrompt[]> {
         const prompts: HealthPrompt[] = [];
 
-        // Example: Heart Rate Trend
+        // 1. Heart Rate Trend
         const hrHistory = await clinicalSignalService.getSignalHistory(userId, 'heart_rate', 10);
         if (hrHistory.length >= 5) {
             const averageHR = hrHistory.reduce((sum, s) => sum + (s.value as number), 0) / hrHistory.length;
@@ -129,6 +129,44 @@ class AIPromptService {
                     reason: `Latest HR (${latestHR}) is significantly higher than 10-day average (${Math.round(averageHR)}).`,
                     trigger_text: "Your resting heart rate shows an unusual trend.",
                     chat_opening: `I've noticed your resting heart rate is consistently higher today than your recent average. This can sometimes be a precursor to fatigue or illness, or just a reflection of stress.`,
+                    next_action: 'monitor'
+                });
+            }
+        }
+
+        // 2. HRV Trend (Stress/Recovery)
+        const hrvHistory = await clinicalSignalService.getSignalHistory(userId, 'heart_rate_variability', 10);
+        if (hrvHistory.length >= 5) {
+            const averageHRV = hrvHistory.slice(1).reduce((sum, s) => sum + (s.value as number), 0) / (hrvHistory.length - 1);
+            const latestHRV = hrvHistory[0].value as number;
+
+            if (latestHRV < averageHRV * 0.7) {
+                prompts.push({
+                    id: 'low_hrv_detected',
+                    source: 'signal',
+                    confidence: 'high',
+                    reason: `Latest HRV (${latestHRV}ms) is 30% lower than 10-day average (${Math.round(averageHRV)}ms).`,
+                    trigger_text: "Your body shows signs of significant physiological stress.",
+                    chat_opening: `I've noticed a significant drop in your heart rate variability (HRV) compared to your recent baseline. This often indicates that your nervous system is under stress or that you haven't fully recovered. How has your energy been?`,
+                    next_action: 'discuss'
+                });
+            }
+        }
+
+        // 3. Resting HR Trend
+        const restingHRHistory = await clinicalSignalService.getSignalHistory(userId, 'resting_heart_rate', 10);
+        if (restingHRHistory.length >= 5) {
+            const averageRHR = restingHRHistory.slice(1).reduce((sum, s) => sum + (s.value as number), 0) / (restingHRHistory.length - 1);
+            const latestRHR = restingHRHistory[0].value as number;
+
+            if (latestRHR > averageRHR + 8) {
+                prompts.push({
+                    id: 'elevated_resting_hr',
+                    source: 'signal',
+                    confidence: 'medium',
+                    reason: `Resting HR (${latestRHR}) is elevated compared to baseline (${Math.round(averageRHR)}).`,
+                    trigger_text: "Your resting heart rate is higher than usual today.",
+                    chat_opening: `Your resting heart rate is up about ${Math.round(latestRHR - averageRHR)} bpm from your usual average. This can sometimes be an early sign of a cold or general fatigue. Are you feeling any other symptoms?`,
                     next_action: 'monitor'
                 });
             }

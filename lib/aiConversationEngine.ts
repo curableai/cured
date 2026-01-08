@@ -3,28 +3,49 @@ import * as Notifications from 'expo-notifications';
 // import OpenAI from 'openai'; // Removed
 import { supabase } from './supabaseClient';
 
-// Backend AI Configuration
-const EDGE_FUNCTION_NAME = 'clinical-ai';
-
 export async function generateProactiveQuestion(
   userId: string, // Added userId for Edge Function context
   anomaly: any
 ): Promise<string> {
   try {
-    const { data, error: functionError } = await supabase.functions.invoke(EDGE_FUNCTION_NAME, {
-      body: {
-        action: 'generate_question',
-        userId,
-        payload: { anomaly }
-      }
-    });
-
-    if (functionError) {
-      console.warn('Edge Function failed, using fallback');
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+    
+    if (!OPENAI_API_KEY) {
+      console.warn('OpenAI API key not configured, using fallback');
       return generateFallbackQuestion(anomaly, { full_name: 'there' });
     }
 
-    return data.question || generateFallbackQuestion(anomaly, { full_name: 'there' });
+    const prompt = `Generate a personalized follow-up question for a health anomaly:
+${JSON.stringify(anomaly, null, 2)}
+
+Return ONLY a natural, conversational question (1-2 sentences) that's empathetic and non-alarmist.`;
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'You are a caring health assistant generating follow-up questions.' },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 100
+      })
+    });
+
+    if (!response.ok) {
+      console.warn('OpenAI API failed, using fallback');
+      return generateFallbackQuestion(anomaly, { full_name: 'there' });
+    }
+
+    const data = await response.json();
+    const question = data?.choices?.[0]?.message?.content?.trim() || generateFallbackQuestion(anomaly, { full_name: 'there' });
+    
+    return question;
   } catch (error) {
     console.error('Error generating AI question:', error);
     return generateFallbackQuestion(anomaly, { full_name: 'there' });

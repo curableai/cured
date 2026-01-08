@@ -13,7 +13,6 @@ import {
     ScrollView,
     StyleSheet,
     Text,
-    TouchableOpacity,
     View
 } from 'react-native';
 
@@ -146,30 +145,7 @@ export default function CheckinCompleteScreen() {
                     )}
                 </View>
 
-                {/* Actions */}
-                <View style={styles.actions}>
-                    <TouchableOpacity
-                        onPress={() => router.push('/predictions')}
-                        style={[
-                            styles.primaryButton,
-                            { backgroundColor: colors.primary }
-                        ]}
-                    >
-                        <Text style={styles.primaryButtonText}>
-                            View Health Insights
-                        </Text>
-                        <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
-                    </TouchableOpacity>
 
-                    <TouchableOpacity
-                        onPress={() => router.replace('/')}
-                        style={styles.secondaryButton}
-                    >
-                        <Text style={[styles.secondaryButtonText, { color: colors.textMuted }]}>
-                            Return to Dashboard
-                        </Text>
-                    </TouchableOpacity>
-                </View>
             </ScrollView>
         </SafeAreaView>
     );

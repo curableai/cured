@@ -8,6 +8,7 @@ import {
     requestHealthConnectPermissions,
     SdkAvailabilityStatus,
 } from '@/lib/healthConnect';
+import { fetchHealthData, isHealthKitAvailable } from '@/lib/healthkitManager';
 import { supabase } from '@/lib/supabaseClient';
 import { Platform } from 'react-native';
 
@@ -149,8 +150,82 @@ export async function getUnifiedHealthData(userId: string): Promise<UnifiedHealt
                 }
             }
         }
+    } else if (Platform.OS === 'ios') {
+        const watchData = await fetchHealthData();
+        if (watchData) {
+            isWatchConnected = true;
+            lastSyncTime = watchData.lastUpdated;
+
+            // Heart Rate
+            if (watchData.heartRate > 0) {
+                metrics.push({
+                    id: 'heart_rate',
+                    label: 'Heart Rate',
+                    value: Math.round(watchData.heartRate),
+                    unit: 'bpm',
+                    icon: 'heart-outline',
+                    available: true,
+                    source: 'watch',
+                });
+            }
+
+            // Steps
+            if (watchData.steps > 0) {
+                metrics.push({
+                    id: 'steps',
+                    label: 'Steps',
+                    value: watchData.steps.toLocaleString(),
+                    unit: 'steps',
+                    icon: 'walk-outline',
+                    available: true,
+                    source: 'watch',
+                });
+            }
+
+            // Sleep
+            if (watchData.sleepHours > 0) {
+                metrics.push({
+                    id: 'sleep',
+                    label: 'Sleep',
+                    value: watchData.sleepHours.toFixed(1),
+                    unit: 'hrs',
+                    icon: 'moon-outline',
+                    available: true,
+                    source: 'watch',
+                });
+            }
+
+            // SpO2
+            if (watchData.bloodOxygen && watchData.bloodOxygen > 0) {
+                metrics.push({
+                    id: 'spo2',
+                    label: 'SpO2',
+                    value: Math.round(watchData.bloodOxygen * 100),
+                    unit: '%',
+                    icon: 'water-outline',
+                    available: true,
+                    source: 'watch',
+                });
+            }
+
+            // Active Energy
+            if (watchData.activeEnergyBurned && watchData.activeEnergyBurned > 0) {
+                metrics.push({
+                    id: 'calories',
+                    label: 'Calories',
+                    value: Math.round(watchData.activeEnergyBurned),
+                    unit: 'kcal',
+                    icon: 'flame-outline',
+                    available: true,
+                    source: 'watch',
+                });
+            }
+
+            // Blood Pressure (Removed from Watch source as per user request)
+        }
     }
 
+    /* 
     // 2. Get BP from daily check-in (signals table)
     const bpData = await fetchBPFromCheckin(userId);
     if (bpData) {
@@ -163,6 +238,52 @@ export async function getUnifiedHealthData(userId: string): Promise<UnifiedHealt
             available: true,
             source: 'checkin',
         });
+    }
+    */
+
+    // 3. Add other watch-specific metrics for Apple Watch
+    if (Platform.OS === 'ios' && isWatchConnected) {
+        const watchData = await fetchHealthData();
+        if (watchData) {
+            // Heart Rate Variability
+            if (watchData.heartRateVariability > 0) {
+                metrics.push({
+                    id: 'hrv',
+                    label: 'HRV',
+                    value: Math.round(watchData.heartRateVariability),
+                    unit: 'ms',
+                    icon: 'pulse-outline',
+                    available: true,
+                    source: 'watch',
+                });
+            }
+
+            // Resting Heart Rate
+            if (watchData.restingHeartRate > 0) {
+                metrics.push({
+                    id: 'resting_hr',
+                    label: 'Resting HR',
+                    value: Math.round(watchData.restingHeartRate),
+                    unit: 'bpm',
+                    icon: 'heart-half-outline',
+                    available: true,
+                    source: 'watch',
+                });
+            }
+
+            // Headphone Audio Level
+            if (watchData.headphoneAudioLevel > 0) {
+                metrics.push({
+                    id: 'audio_level',
+                    label: 'Audio Level',
+                    value: Math.round(watchData.headphoneAudioLevel),
+                    unit: 'dB',
+                    icon: 'headset-outline',
+                    available: true,
+                    source: 'watch',
+                });
+            }
+        }
     }
 
     return {
@@ -252,6 +373,8 @@ export async function isHealthServiceAvailable(): Promise<boolean> {
         const status = await checkHealthConnectAvailability();
         return status === SdkAvailabilityStatus.SDK_AVAILABLE;
     }
-    // iOS: Will implement HealthKit check later
+    if (Platform.OS === 'ios') {
+        return await isHealthKitAvailable();
+    }
     return false;
 }

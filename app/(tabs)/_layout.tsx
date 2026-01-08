@@ -1,15 +1,32 @@
+import { AnimatedTabIcon } from '@/components/AnimatedTabIcon';
 import { supabase } from '@/lib/supabaseClient';
 import { useTheme } from '@/lib/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React, { useEffect, useState } from 'react';
+import { Keyboard } from 'react-native';
 
 export default function TabLayout() {
   const { colors } = useTheme();
   const [userDisplay, setUserDisplay] = useState('Profile');
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
   useEffect(() => {
     fetchUserData();
+  }, []);
+
+  useEffect(() => {
+    const showListener = Keyboard.addListener('keyboardDidShow', () => {
+      setIsKeyboardVisible(true);
+    });
+    const hideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      showListener.remove();
+      hideListener.remove();
+    };
   }, []);
 
   const fetchUserData = async () => {
@@ -60,6 +77,7 @@ export default function TabLayout() {
           borderTopWidth: 0,
           borderWidth: 1,
           borderColor: 'rgba(255, 107, 0, 0.1)',
+          display: isKeyboardVisible ? 'none' : 'flex', // Hide when keyboard is visible
         },
 
         tabBarLabelStyle: {
@@ -99,8 +117,14 @@ export default function TabLayout() {
         name="ai-assistant"
         options={{
           title: 'Curable AI',
+          tabBarStyle: { display: 'none' },
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? "ellipse" : "ellipse-outline"} size={22} color={color} />
+            <AnimatedTabIcon
+              name={focused ? "ellipse" : "ellipse-outline"}
+              size={22}
+              color={color}
+              focused={focused}
+            />
           ),
         }}
       />
@@ -127,9 +151,10 @@ export default function TabLayout() {
 
       {/* Hide legacy and utility tabs */}
       <Tabs.Screen name="doctors" options={{ href: null }} />
-      <Tabs.Screen name="predictions" options={{ href: null }} />
       <Tabs.Screen name="medication" options={{ href: null }} />
       <Tabs.Screen name="profile" options={{ href: null }} />
+      <Tabs.Screen name="predictions" options={{ href: null }} />
+      <Tabs.Screen name="explore" options={{ href: null }} />
     </Tabs>
   );
 }

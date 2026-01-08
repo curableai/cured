@@ -45,23 +45,23 @@ export const scheduleDailyCheckin = async () => {
     // Cancel existing notifications
     await Notifications.cancelAllScheduledNotificationsAsync();
 
-    // Schedule for 8 AM daily
+    // Schedule for 6 PM daily (when check-in feature unlocks)
     await Notifications.scheduleNotificationAsync({
         content: {
-            title: "Good morning! 🌅",
-            body: "Time for your quick health check-in",
+            title: "Time to check in! 🌙",
+            body: "How did your day go? Log your lifestyle stats now.",
             sound: true,
             data: { screen: 'DailyCheckin' }
         },
         trigger: {
             type: SchedulableTriggerInputTypes.CALENDAR,
-            hour: 8,
+            hour: 18,
             minute: 0,
             repeats: true,
         } as any,
     });
 
-    console.log('✓ Daily check-in reminder scheduled for 8:00 AM');
+    console.log('✓ Daily check-in reminder scheduled for 6:00 PM');
 };
 
 // Handle notification tap

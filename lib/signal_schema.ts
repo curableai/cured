@@ -419,6 +419,54 @@ const LIFESTYLE_SIGNALS: SignalDefinition[] = [
         question: 'How would you rate your meals today?',
         chips: ['Unhealthy', 'Moderate', 'Healthy', 'Very healthy']
     },
+    {
+        id: 'sodium_intake',
+        category: 'lifestyle',
+        name: 'Sodium Intake',
+        valueType: 'categorical',
+        validation: { options: ['low', 'moderate', 'high', 'excessive'] },
+        frequency: 'daily',
+        freshnessWindow: 24,
+        trackTrend: true,
+        trendWindow: 7,
+        affectsRisk: true,
+        riskWeight: 0.8,
+        allowedSources: ['chat_confirmed', 'daily_checkin'],
+        question: 'How much salt was in your food today?',
+        chips: ['Very little', 'Normal', 'High (processed food)', 'Very high']
+    },
+    {
+        id: 'sugar_intake',
+        category: 'lifestyle',
+        name: 'Sugar Intake',
+        valueType: 'categorical',
+        validation: { options: ['low', 'moderate', 'high', 'excessive'] },
+        frequency: 'daily',
+        freshnessWindow: 24,
+        trackTrend: true,
+        trendWindow: 7,
+        affectsRisk: true,
+        riskWeight: 0.7,
+        allowedSources: ['chat_confirmed', 'daily_checkin'],
+        question: 'How much sugar did you have today?',
+        chips: ['None/Low', 'Some', 'High', 'Very high']
+    },
+    {
+        id: 'potassium_intake',
+        category: 'lifestyle',
+        name: 'Potassium Intake',
+        valueType: 'categorical',
+        validation: { options: ['low', 'adequate', 'high'] },
+        frequency: 'daily',
+        freshnessWindow: 24,
+        trackTrend: true,
+        trendWindow: 7,
+        affectsRisk: true,
+        riskWeight: 0.4,
+        allowedSources: ['chat_confirmed', 'daily_checkin'],
+        question: 'Did you eat potassium-rich foods (beans, bananas, greens)?',
+        chips: ['No', 'Some', 'Yes, plenty']
+    },
 
     // STRESS & MENTAL
     {
@@ -854,6 +902,61 @@ const RED_FLAG_SIGNALS: SignalDefinition[] = [
 // ============================================================================
 
 const VITAL_SIGNALS: SignalDefinition[] = [
+    {
+        id: 'heart_rate_variability',
+        category: 'vital',
+        name: 'Heart Rate Variability',
+        valueType: 'numeric',
+        validation: { min: 1, max: 200 },
+        frequency: 'continuous',
+        freshnessWindow: 24,
+        trackTrend: true,
+        trendWindow: 7,
+        affectsRisk: true,
+        riskWeight: 0.5,
+        allowedSources: ['device_healthkit'],
+        deviceMapping: {
+            ios: 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN'
+        },
+        unit: 'ms'
+    },
+    {
+        id: 'resting_heart_rate',
+        category: 'vital',
+        name: 'Resting Heart Rate',
+        valueType: 'numeric',
+        validation: { min: 30, max: 120 },
+        frequency: 'daily',
+        freshnessWindow: 48,
+        trackTrend: true,
+        trendWindow: 30,
+        affectsRisk: true,
+        riskWeight: 0.6,
+        allowedSources: ['device_healthkit', 'device_health_connect'],
+        deviceMapping: {
+            ios: 'HKQuantityTypeIdentifierRestingHeartRate',
+            android: 'RestingHeartRate'
+        },
+        unit: 'bpm'
+    },
+    {
+        id: 'headphone_audio_level',
+        category: 'vital',
+        name: 'Headphone Audio Level',
+        valueType: 'numeric',
+        validation: { min: 0, max: 150 },
+        frequency: 'continuous',
+        freshnessWindow: 24,
+        trackTrend: true,
+        trendWindow: 7,
+        affectsRisk: true,
+        riskWeight: 0.3,
+        allowedSources: ['device_healthkit'],
+        deviceMapping: {
+            ios: 'HKQuantityTypeIdentifierHeadphoneAudioExposure'
+        },
+        unit: 'dB'
+    },
     {
         id: 'heart_rate',
         category: 'vital',

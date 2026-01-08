@@ -5,6 +5,7 @@ import {
     requestHealthConnectPermissions,
     SdkAvailabilityStatus
 } from '@/lib/healthConnect';
+import { requestHealthKitPermissions } from '@/lib/healthkitManager';
 import { useTheme } from '@/lib/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -23,7 +24,7 @@ import {
 
 const WATCH_BRANDS = [
     { id: 'oraimo', name: 'Oraimo', icon: 'watch-outline' },
-    { id: 'fitbit', name: 'Fitbit', icon: 'fitness-outline' },
+    { id: 'apple', name: 'Apple Watch', icon: 'logo-apple' },
     { id: 'samsung', name: 'Samsung', icon: 'logo-android' },
     { id: 'xiaomi', name: 'Xiaomi', icon: 'watch-outline' },
     { id: 'pixel', name: 'Google Pixel', icon: 'logo-google' },
@@ -56,6 +57,18 @@ export default function ConnectDeviceScreen() {
     };
 
     const handleConnect = async () => {
+        if (Platform.OS === 'ios') {
+            const success = await requestHealthKitPermissions(undefined, true);
+            if (success) {
+                Alert.alert("Success", "Apple Health connected! Your data will now sync.", [
+                    { text: "OK", onPress: () => router.back() }
+                ]);
+            } else {
+                Alert.alert("Permission Required", "We need permission to read your health data to provide insights.");
+            }
+            return;
+        }
+
         if (Platform.OS !== 'android') {
             Alert.alert("Not Supported", "Health Connect is only available on Android. For iOS, we use Apple Health.");
             return;
@@ -180,6 +193,33 @@ export default function ConnectDeviceScreen() {
                                 <Text style={[styles.noteText, { color: colors.textMuted }]}>
                                     Note: Data sync may take a few minutes after setup.
                                 </Text>
+                            </View>
+                        ) : selectedBrand === 'apple' ? (
+                            <View style={[styles.infoCard, { backgroundColor: colors.surfaceElevated }]}>
+                                <Ionicons name="logo-apple" size={24} color={colors.text} style={{ marginBottom: 8 }} />
+                                <Text style={[styles.infoText, { color: colors.text, fontWeight: '600' }]}>
+                                    Apple Watch Setup
+                                </Text>
+                                <View style={styles.requirementList}>
+                                    <View style={styles.reqItem}>
+                                        <Text style={[styles.reqNumber, { color: colors.primary }]}>1.</Text>
+                                        <Text style={[styles.reqText, { color: colors.text }]}>
+                                            Ensure your Apple Watch is paired with your iPhone.
+                                        </Text>
+                                    </View>
+                                    <View style={styles.reqItem}>
+                                        <Text style={[styles.reqNumber, { color: colors.primary }]}>2.</Text>
+                                        <Text style={[styles.reqText, { color: colors.text }]}>
+                                            Tap "Connect Health System" below to allow Curable to read health data.
+                                        </Text>
+                                    </View>
+                                    <View style={styles.reqItem}>
+                                        <Text style={[styles.reqNumber, { color: colors.primary }]}>3.</Text>
+                                        <Text style={[styles.reqText, { color: colors.text }]}>
+                                            In the system prompt, enable all requested health categories.
+                                        </Text>
+                                    </View>
+                                </View>
                             </View>
                         ) : (
                             <View style={[styles.infoCard, { backgroundColor: colors.surfaceElevated }]}>

@@ -2,8 +2,9 @@ import { CURABLE_AI_SYSTEM_PROMPT, getAIPromptMetadata } from '@/lib/ai-prompt';
 import { clinicalSignalService as signalCaptureService } from '@/services/clinicalSignalCapture';
 import { supabase } from './supabaseClient';
 
-// Backend AI Configuration
-const EDGE_FUNCTION_NAME = 'clinical-ai';
+// ==================== CONSTANTS ====================
+
+const EDGE_FUNCTION_NAME = 'smart-ai-controller';
 
 // ==================== TYPES ====================
 
@@ -270,16 +271,65 @@ export async function analyzeMedicationsWithAI(
   confidence: number;
 } | null> {
   try {
-    const { data, error: functionError } = await supabase.functions.invoke(EDGE_FUNCTION_NAME, {
-      body: { action: 'medications', userId, payload: { medications } }
-    });
+    console.log('Analyzing medications with OpenAI:', medications);
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 
-    if (functionError) {
-      console.error('Edge Function error:', functionError);
+    if (!OPENAI_API_KEY) {
+      console.error('OpenAI API key not configured');
       return null;
     }
 
-    return data;
+    const medList = medications
+      .map(m => `${m.name} ${m.dosage} ${m.frequency}`)
+      .join(', ');
+
+    const prompt = `Analyze these medications: ${medList}
+
+Return ONLY this JSON format:
+{
+  "effects": ["effect1", "effect2"],
+  "sideEffects": ["side1", "side2"],
+  "interactions": ["interaction1"],
+  "recommendations": ["rec1"],
+  "confidence": 0.85
+}`;
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'You are a medication analysis assistant. Return only valid JSON.' },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.5,
+        response_format: { type: 'json_object' }
+      })
+    });
+
+    if (!response.ok) {
+      console.error('OpenAI API error:', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    const text = data?.choices?.[0]?.message?.content || '{}';
+    const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(cleaned);
+
+    console.log('Medication analysis result:', parsed);
+
+    return {
+      effects: parsed?.effects || [],
+      sideEffects: parsed?.sideEffects || [],
+      interactions: parsed?.interactions || [],
+      recommendations: parsed?.recommendations || [],
+      confidence: parsed?.confidence || 0
+    };
   } catch (error) {
     console.error('Error analyzing medications:', error);
     return null;
@@ -314,15 +364,18 @@ export async function chatWithHealthAI(
   conversationHistory: Array<{ role: string; content: string }> = []
 ): Promise<{
   message: string;
+  reasoning?: string;
   hasExtremeFlags: boolean;
   extremeSignals?: any[];
+  groundingMetadata?: any;
+  researchSummary?: string;
 }> {
   try {
 
     const profile = await getUserHealthProfile(userId);
     if (!profile) {
       return {
-        message: "I don't have access to your health data yet.",
+        message: "I don't have access to your health data yet. Please complete your onboarding first.",
         hasExtremeFlags: false
       };
     }
@@ -337,6 +390,13 @@ export async function chatWithHealthAI(
       getDetailedMedications(userId),
       getCheckinTrends(userId)
     ]);
+
+    console.log('📊 User Data Loaded:', {
+      profile: profile.fullName,
+      medications: medications.length,
+      hasCheckins: !!checkinTrends,
+      signals: recentSignals.length
+    });
 
     // ✅ USE THE SAFE PROMPT (from ai-prompt.ts)
     let systemPrompt = CURABLE_AI_SYSTEM_PROMPT;
@@ -356,7 +416,7 @@ export async function chatWithHealthAI(
 
     // Check-in Trends
     if (checkinTrends) {
-      systemPrompt += `DAILY CHECK-IN TRENDS (Last 7 days):\n${checkinTrends}\n\n`;
+      systemPrompt += `DAILY CHECK-IN TRENDS (Last 3 days):\n${checkinTrends}\n\n`;
     }
 
     systemPrompt += `CURRENT HEALTH METRICS:\n`;
@@ -390,41 +450,71 @@ export async function chatWithHealthAI(
       { role: 'user', content: message },
     ];
 
-    // ✅ CALL SMART AI CONTROLLER (BACKEND)
-    const { data, error: functionError } = await supabase.functions.invoke(EDGE_FUNCTION_NAME, {
-      body: {
-        action: 'chat',
-        userId,
-        message,
-        history: conversationHistory,
-        context: {
-          hasExtremeFlags,
-          extremeSignals: hasExtremeFlags ? extremeSignals : []
-        }
-      }
-    });
+    console.log('🤖 Calling OpenAI with full context...');
 
-    if (functionError) {
-      console.error('Edge Function error:', functionError);
-      throw new Error('Failed to connect to AI backend');
+    // ✅ CALL OPENAI DIRECTLY (NOT EDGE FUNCTION)
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+
+    if (!OPENAI_API_KEY) {
+      console.error('❌ OpenAI API key not configured');
+      return {
+        message: "I'm not properly configured. Please contact support.",
+        hasExtremeFlags: false
+      };
     }
 
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: messages,
+        temperature: 0.7,
+        max_tokens: 800
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('OpenAI API error:', response.status, errorText);
+      throw new Error(`OpenAI API error: ${response.status}`);
+    }
+
+    const data = await response.json();
     const aiMessage = data.choices[0].message.content;
 
+    console.log('✅ AI Response received');
+
+    // ✅ EXTRACT LOGIC (Visual Reasoning)
+    let finalMessage = aiMessage;
+    let reasoning: string | undefined = undefined;
+
+    const logicMatch = aiMessage.match(/\[LOGIC: (.*?)\]/);
+    if (logicMatch) {
+      reasoning = logicMatch[1];
+      finalMessage = aiMessage.replace(/\[LOGIC: (.*?)\]\n?/, '').trim();
+    }
+
     // ✅ VALIDATE RESPONSE
-    const validation = validateAIResponse(aiMessage);
+    const validation = validateAIResponse(finalMessage);
     if (!validation.isValid) {
       console.error('⚠️ AI USED FORBIDDEN PHRASES:', validation.errors);
-      await logValidationFailure(userId, aiMessage, validation.errors);
+      await logValidationFailure(userId, finalMessage, validation.errors);
     }
 
     // ✅ LOG FOR AUDIT TRAIL
-    await logAIInteraction(userId, message, aiMessage, hasExtremeFlags);
+    await logAIInteraction(userId, message, finalMessage, hasExtremeFlags);
 
     return {
-      message: aiMessage,
+      message: finalMessage,
+      reasoning,
       hasExtremeFlags,
-      extremeSignals: hasExtremeFlags ? extremeSignals : undefined
+      extremeSignals: hasExtremeFlags ? extremeSignals : undefined,
+      groundingMetadata: undefined,
+      researchSummary: undefined
     };
 
   } catch (error) {

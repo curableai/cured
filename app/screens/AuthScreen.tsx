@@ -40,7 +40,7 @@ export default function AuthScreen() {
   const redirectUser = async (userId: string) => {
     try {
       const { data: doctor } = await supabase.from('doctors').select('id').eq('user_id', userId).single();
-      if (doctor) { router.replace('/(doctor)/dashboard'); return; }
+     // if (doctor) { router.replace('/(doctor)/dashboard'); return; }//
 
       const { data: profile } = await supabase.from('profiles').select('onboarding_completed').eq('id', userId).single();
 

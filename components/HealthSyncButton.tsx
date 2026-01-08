@@ -10,19 +10,19 @@ interface HealthSyncButtonProps {
   fullWidth?: boolean;
 }
 
-export default function HealthSyncButton({ 
-  variant = 'primary', 
-  fullWidth = false 
+export default function HealthSyncButton({
+  variant = 'primary',
+  fullWidth = false
 }: HealthSyncButtonProps) {
   const [syncing, setSyncing] = useState(false);
 
   const handleSync = async () => {
     setSyncing(true);
-    
+
     try {
       // Get current user
       const { data: { user } } = await supabase.auth.getUser();
-      
+
       if (!user) {
         Alert.alert('Error', 'Please sign in to sync health data');
         return;
@@ -30,7 +30,7 @@ export default function HealthSyncButton({
 
       // Try to sync data
       const success = await syncHealthData(user.id);
-      
+
       if (success) {
         Alert.alert('Success', 'Health data synced successfully! 🎉');
       } else {
@@ -43,7 +43,7 @@ export default function HealthSyncButton({
             {
               text: 'Check Permissions',
               onPress: async () => {
-                await requestHealthKitPermissions(true);
+                await requestHealthKitPermissions(undefined, true);
               },
             },
           ]
@@ -70,9 +70,9 @@ export default function HealthSyncButton({
       disabled={syncing}
     >
       {syncing ? (
-        <ActivityIndicator 
-          color={variant === 'primary' ? '#ffffff' : '#38bdf8'} 
-          size="small" 
+        <ActivityIndicator
+          color={variant === 'primary' ? '#ffffff' : '#38bdf8'}
+          size="small"
         />
       ) : (
         <>

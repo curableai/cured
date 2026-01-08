@@ -1,18 +1,20 @@
 import OptionChips from '@/components/checkin/OptionChips';
+import DailyTipsCard from '@/components/DailyTipsCard';
+import { HealthInsightBoard } from '@/components/HealthInsightBoard';
+import { aiCheckinService, DynamicQuestion } from '@/lib/aiCheckinService';
 import {
-    calculateLifestyleScore,
-    CheckinAnswers,
-    DAILY_CHECKIN_QUESTIONS,
-    generateLifestyleMessage
+    CheckinAnswers
 } from '@/lib/checkinQuestions';
 import { supabase } from '@/lib/supabaseClient';
 import { useTheme } from '@/lib/theme';
+import { clinicalSignalService } from '@/services/clinicalSignalCapture';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    RefreshControl,
     SafeAreaView,
     ScrollView,
     StyleSheet,
@@ -31,18 +33,21 @@ export default function DailyCheckinScreen() {
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
     const [saving, setSaving] = useState(false);
 
+    // Dynamic Questions
+    const [questions, setQuestions] = useState<DynamicQuestion[]>([]);
+    const [loadingQuestions, setLoadingQuestions] = useState(true);
+
     // Lock states
     const [isLoading, setIsLoading] = useState(true);
     const [isLocked, setIsLocked] = useState(false);
     const [isCompleted, setIsCompleted] = useState(false);
     const [availableTime, setAvailableTime] = useState("6:00 PM");
 
-    const questions = DAILY_CHECKIN_QUESTIONS;
     const currentQuestion = questions[currentQuestionIndex];
     const isFirstQuestion = currentQuestionIndex === 0;
     const isLastQuestion = currentQuestionIndex === questions.length - 1;
 
-    const progress = ((currentQuestionIndex + 1) / questions.length) * 100;
+    const progress = questions.length > 0 ? ((currentQuestionIndex + 1) / questions.length) * 100 : 0;
 
     // Check status check on mount
     useEffect(() => {
@@ -69,30 +74,64 @@ export default function DailyCheckinScreen() {
                 // 1. Check if already completed today
                 const today = new Date().toISOString().split('T')[0];
 
-                // Check if check-in exists for today in daily_checkins table
                 const { data: checkin } = await supabase
                     .from('daily_checkins')
-                    .select('id')
+                    .select('id, completed')
                     .eq('user_id', user.id)
                     .eq('checkin_date', today)
+                    .eq('completed', true) // ✅ Only show as completed if explicitly marked
                     .maybeSingle();
 
                 if (checkin) {
-                    setIsCompleted(true);
-                    setIsLoading(false);
-                    return;
+                    // ✅ User completed today's check-in
+                    // Check if it's past 6 PM - if so, allow new check-in for tomorrow
+                    const currentHour = new Date().getHours();
+                    const UNLOCK_HOUR = 18; // 6 PM
+
+                    if (currentHour >= UNLOCK_HOUR) {
+                        // It's past 6 PM, check if tomorrow's check-in exists
+                        const tomorrow = new Date();
+                        tomorrow.setDate(tomorrow.getDate() + 1);
+                        const tomorrowDate = tomorrow.toISOString().split('T')[0];
+
+                        const { data: tomorrowCheckin } = await supabase
+                            .from('daily_checkins')
+                            .select('id, completed')
+                            .eq('user_id', user.id)
+                            .eq('checkin_date', tomorrowDate)
+                            .eq('completed', true)
+                            .maybeSingle();
+
+                        if (tomorrowCheckin) {
+                            // Tomorrow's check-in also completed, show completed state
+                            setIsCompleted(true);
+                            setIsLoading(false);
+                            return;
+                        }
+                        // Else: Fall through to load questions for tomorrow
+                    } else {
+                        // Before 6 PM and today is completed, show completed state
+                        setIsCompleted(true);
+                        setIsLoading(false);
+                        return;
+                    }
+                }
+
+                // 2. Fetch AI-generated dynamic questions
+                try {
+                    setLoadingQuestions(true);
+                    const dynamicQuestions = await aiCheckinService.generateDailyStack(user.id);
+                    setQuestions(dynamicQuestions);
+                } catch (err) {
+                    console.error('Failed to load dynamic questions:', err);
+                } finally {
+                    setLoadingQuestions(false);
                 }
             }
 
-            // 2. Check time (Must be after 6 PM / 18:00)
-            const currentHour = new Date().getHours();
-            const UNLOCK_HOUR = 18; // 6 PM
+            // 3. No time-based locking - available anytime if not completed
+            setIsLocked(false);
 
-            if (currentHour < UNLOCK_HOUR) {
-                setIsLocked(true);
-            }
-
-            // 3. Schedule Notification for 8 PM
             scheduleDailyReminder();
 
         } catch (error) {
@@ -120,7 +159,7 @@ export default function DailyCheckinScreen() {
                     body: "How did your day go? Log your lifestyle stats now.",
                 },
                 trigger: {
-                    hour: 20, // 8 PM
+                    hour: 18, // 6 PM - matches unlock time
                     minute: 0,
                     type: Notifications.SchedulableTriggerInputTypes.DAILY
                 },
@@ -172,25 +211,61 @@ export default function DailyCheckinScreen() {
     const handleComplete = async (finalAnswers: CheckinAnswers) => {
         setSaving(true);
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error('User not authenticated');
+            // Try to get user with session refresh
+            let { data: { user }, error: authError } = await supabase.auth.getUser();
 
-            // 1. Calculate Score & Insights
-            const { score, insights } = calculateLifestyleScore(finalAnswers);
-            const message = generateLifestyleMessage(finalAnswers);
+            // If no user, try refreshing the session
+            if (!user || authError) {
+                console.log('⚠️ No user found, attempting session refresh...');
+                const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
 
-            // 2. Prepare Record for daily_checkins table
-            // We save a single row per day with all data
+                if (refreshError || !session) {
+                    console.error('❌ Session refresh failed:', refreshError);
+                    throw new Error('Your session has expired. Please log in again.');
+                }
+
+                user = session.user;
+                console.log('✅ Session refreshed successfully');
+            }
+
+            if (!user) {
+                console.error('❌ User still not authenticated after refresh');
+                throw new Error('User not authenticated');
+            }
+
+            console.log('✅ User authenticated:', user.id);
+
+            // 1. Get AI-driven Score & Insights
+            const aiAnalysis = await aiCheckinService.scoreCheckin(user.id, finalAnswers);
+            const { score, feedback, insights } = aiAnalysis;
+
+            // 2. CAPTURE AS CLINICAL SIGNALS
+            // Every answer from a check-in is a SignalInstance
+            for (const [signalId, value] of Object.entries(finalAnswers)) {
+                try {
+                    await clinicalSignalService.captureSignal({
+                        signalId,
+                        value: value as any,
+                        source: 'daily_checkin',
+                        capturedAt: new Date().toISOString()
+                    });
+                } catch (sigErr) {
+                    console.error(`Failed to capture signal ${signalId}:`, sigErr);
+                }
+            }
+
+            // 3. Prepare Record for daily_checkins table
             const checkinRecord = {
                 user_id: user.id,
                 checkin_date: new Date().toISOString().split('T')[0],
                 lifestyle_score: score,
-                mood: finalAnswers.general_wellbeing,
+                mood: finalAnswers.general_wellbeing || finalAnswers.mood,
                 stress_level: finalAnswers.stress_level,
                 sleep_quality: finalAnswers.sleep_quality,
                 energy_level: finalAnswers.energy_level,
-                answers: finalAnswers, // Full JSON payload
-                insights: insights
+                answers: finalAnswers,
+                insights: insights,
+                completed: true // ✅ Mark as completed only when user finishes all questions
             };
 
             const { error } = await supabase
@@ -205,7 +280,7 @@ export default function DailyCheckinScreen() {
             router.replace({
                 pathname: '/CheckinCompleteScreen' as any,
                 params: {
-                    message,
+                    message: feedback,
                     score,
                     insights: JSON.stringify(insights)
                 }
@@ -213,7 +288,8 @@ export default function DailyCheckinScreen() {
 
         } catch (error) {
             console.error('Error completing check-in:', error);
-            Alert.alert('Error', 'Failed to save check-in. Please try again.');
+            const errorMessage = error instanceof Error ? error.message : 'Failed to save check-in. Please try again.';
+            Alert.alert('Error', errorMessage);
             setSaving(false);
         }
     };
@@ -228,30 +304,65 @@ export default function DailyCheckinScreen() {
 
     if (isCompleted) {
         return (
-            <SafeAreaView style={[styles.container, { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', padding: 32 }]}>
-                <Text style={{ fontSize: 48, marginBottom: 16 }}>✅</Text>
-                <Text style={[styles.questionText, { color: colors.text, textAlign: 'center' }]}>You're all set for today!</Text>
-                <Text style={[styles.helpText, { color: colors.textMuted, textAlign: 'center' }]}>
-                    Great job checking in. Come back tomorrow evening for your next log.
-                </Text>
-                <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 24, padding: 16 }}>
-                    <Text style={{ color: colors.primary, fontSize: 16, fontWeight: '600' }}>Go Home</Text>
-                </TouchableOpacity>
+            <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+                <ScrollView
+                    contentContainerStyle={{ padding: 24, alignItems: 'center' }}
+                    showsVerticalScrollIndicator={false}
+                    refreshControl={
+                        <RefreshControl refreshing={isLoading} onRefresh={checkStatusAndSchedule} tintColor={colors.primary} />
+                    }
+                >
+                    <Text style={{ fontSize: 48, marginBottom: 16, marginTop: 40 }}>✅</Text>
+                    <Text style={[styles.questionText, { color: colors.text, textAlign: 'center' }]}>You're all set for today!</Text>
+                    <Text style={[styles.helpText, { color: colors.textMuted, textAlign: 'center' }]}>
+                        Great job checking in. Your medical signals have been updated across your health board.
+                    </Text>
+
+                    <TouchableOpacity onPress={() => router.back()} style={{ marginBottom: 40, padding: 12 }}>
+                        <Text style={{ color: colors.primary, fontSize: 16, fontWeight: '600' }}>← Go Home</Text>
+                    </TouchableOpacity>
+
+                    {/* Daily Health Tips */}
+                    <View style={{ width: '100%', marginBottom: 24 }}>
+                        <DailyTipsCard />
+                    </View>
+
+                    {/* Show updated insights immediately */}
+                    <View style={{ width: '100%', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', paddingTop: 32 }}>
+                        <HealthInsightBoard showHeader={false} />
+                    </View>
+                </ScrollView>
             </SafeAreaView>
         );
     }
 
     if (isLocked) {
         return (
-            <SafeAreaView style={[styles.container, { backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center', padding: 32 }]}>
-                <Text style={{ fontSize: 48, marginBottom: 16 }}>🌙</Text>
-                <Text style={[styles.questionText, { color: colors.text, textAlign: 'center' }]}>Check-in opens at 6 PM</Text>
-                <Text style={[styles.helpText, { color: colors.textMuted, textAlign: 'center' }]}>
-                    Daily lifestyle logs are best done at the end of your day. We'll send you a reminder tonight!
-                </Text>
-                <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 24, padding: 16 }}>
-                    <Text style={{ color: colors.primary, fontSize: 16, fontWeight: '600' }}>Go Home</Text>
-                </TouchableOpacity>
+            <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+                <ScrollView
+                    contentContainerStyle={{ padding: 24, alignItems: 'center' }}
+                    showsVerticalScrollIndicator={false}
+                >
+                    <Text style={{ fontSize: 48, marginBottom: 16, marginTop: 40 }}>🌙</Text>
+                    <Text style={[styles.questionText, { color: colors.text, textAlign: 'center' }]}>Come back at 6 PM</Text>
+                    <Text style={[styles.helpText, { color: colors.textMuted, textAlign: 'center' }]}>
+                        You've completed today's check-in! New check-ins unlock at 6 PM daily.
+                    </Text>
+
+                    <TouchableOpacity onPress={() => router.back()} style={{ marginBottom: 40, padding: 12 }}>
+                        <Text style={{ color: colors.primary, fontSize: 16, fontWeight: '600' }}>← Go Home</Text>
+                    </TouchableOpacity>
+
+                    {/* Daily Health Tips */}
+                    <View style={{ width: '100%', marginBottom: 24 }}>
+                        <DailyTipsCard />
+                    </View>
+
+                    {/* Show current signals even while locked */}
+                    <View style={{ width: '100%', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', paddingTop: 32 }}>
+                        <HealthInsightBoard showHeader={false} />
+                    </View>
+                </ScrollView>
             </SafeAreaView>
         );
     }
@@ -343,14 +454,7 @@ export default function DailyCheckinScreen() {
 
                 <View style={styles.spacer} />
 
-                {/* Show preview of lifestyle score */}
-                {Object.keys(answers).length > 3 && (
-                    <View style={[styles.scorePreview, { backgroundColor: `${colors.primary}10` }]}>
-                        <Text style={[styles.scoreText, { color: colors.primary }]}>
-                            Score: {calculateLifestyleScore(answers).score}%
-                        </Text>
-                    </View>
-                )}
+                <View style={styles.spacer} />
             </View>
         </SafeAreaView>
     );
@@ -364,93 +468,81 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         padding: 40
     },
+    scrollContent: {
+        padding: 24,
+        paddingTop: 40,
+        paddingBottom: 200
+    },
     loadingText: {
         marginTop: 16,
-        fontSize: 16,
-        fontWeight: '500',
-        textAlign: 'center'
+        fontSize: 14,
+        fontWeight: '500'
     },
-
     header: {
         paddingHorizontal: 24,
-        paddingTop: 12,
-        paddingBottom: 16
+        paddingTop: 20,
+        paddingBottom: 8
     },
     pillarBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 12,
         alignSelf: 'flex-start',
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        borderRadius: 20,
         marginBottom: 16
     },
     pillarName: {
-        fontSize: 13,
+        fontSize: 12,
         fontWeight: '700',
-        letterSpacing: 0.5,
-        textTransform: 'uppercase'
+        textTransform: 'uppercase',
+        letterSpacing: 1
     },
     progressContainer: {
         gap: 8
     },
     progressBar: {
-        height: 4,
-        borderRadius: 2,
+        height: 6,
+        borderRadius: 3,
         overflow: 'hidden'
     },
     progressFill: {
         height: '100%',
-        borderRadius: 2
+        borderRadius: 3
     },
     progressText: {
-        fontSize: 13,
-        fontWeight: '600',
-        textAlign: 'center'
-    },
-
-    scrollContent: {
-        flexGrow: 1
+        fontSize: 12,
+        fontWeight: '600'
     },
     questionArea: {
-        flex: 1,
-        justifyContent: 'center',
-        paddingHorizontal: 32,
-        paddingVertical: 40,
-        minHeight: 400
+        marginBottom: 32
     },
     questionText: {
-        fontSize: 24,
+        fontSize: 28,
         fontWeight: '700',
-        lineHeight: 32,
-        textAlign: 'center',
-        letterSpacing: -0.5,
-        marginBottom: 12
+        marginBottom: 12,
+        lineHeight: 34
     },
     helpText: {
-        fontSize: 14,
-        lineHeight: 20,
-        textAlign: 'center',
-        marginBottom: 32,
-        opacity: 0.8,
-        fontStyle: 'italic'
+        fontSize: 16,
+        lineHeight: 22,
+        marginBottom: 24
     },
     inputArea: {
-        width: '100%',
-        marginTop: 16
+        marginTop: 8
     },
-
     footer: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
-        paddingHorizontal: 32,
-        // paddingBottom handled dynamically
-        gap: 16
+        paddingHorizontal: 24,
+        paddingTop: 16,
+        backgroundColor: 'transparent'
     },
     navButton: {
         paddingVertical: 12,
-        paddingHorizontal: 8
+        paddingHorizontal: 16,
     },
     navButtonText: {
         fontSize: 16,
@@ -459,17 +551,8 @@ const styles = StyleSheet.create({
     spacer: {
         flex: 1
     },
-    scorePreview: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 12
-    },
-    scoreText: {
-        fontSize: 14,
-        fontWeight: '700'
-    },
     hidden: {
-        opacity: 0,
-        pointerEvents: 'none'
+        opacity: 0
     }
 });
+
