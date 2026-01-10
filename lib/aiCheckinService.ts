@@ -24,7 +24,7 @@ class AICheckinService {
     async generateDailyStack(userId: string): Promise<DynamicQuestion[]> {
         try {
             const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.EXPO_PUBLIC_OPENAI_API_KEY;
-            
+
             if (!OPENAI_API_KEY) {
                 console.warn('OpenAI API key not configured');
                 return this.getFallbackStack();
@@ -40,6 +40,7 @@ USER PROFILE:
 - Gender: ${context.gender || 'Unknown'}
 - Chronic Conditions: ${context.chronicConditions?.join(', ') || 'None'}
 - Current Medications: ${context.medications?.join(', ') || 'None'}
+- Genotype: ${context.genotype || 'Unknown'}
 
 RECENT HEALTH SIGNALS (Last 7 days):
 ${context.recentSignals || 'None recorded'}
@@ -91,6 +92,10 @@ Return ONLY this JSON format:
 
             const data = await response.json();
             const text = data?.choices?.[0]?.message?.content || '{"questions":[]}';
+            if (!text || text === '{"questions":[]}') {
+                console.warn('OpenAI returned no questions');
+                return this.getFallbackStack();
+            }
             const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
             const parsed = JSON.parse(cleaned);
 
@@ -118,6 +123,7 @@ Return ONLY this JSON format:
             context.age = onboarding?.age;
             context.gender = onboarding?.gender;
             context.chronicConditions = onboarding?.chronic_conditions || [];
+            context.genotype = onboarding?.genotype;
 
             // 2. Fetch medications
             const { data: medications } = await supabase
@@ -172,7 +178,7 @@ Return ONLY this JSON format:
     async scoreCheckin(userId: string, answers: any): Promise<{ score: number, feedback: string, insights: string[] }> {
         try {
             const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.EXPO_PUBLIC_OPENAI_API_KEY;
-            
+
             if (!OPENAI_API_KEY) {
                 return { score: 0, feedback: "Analysis engine offline. Please try again.", insights: [] };
             }

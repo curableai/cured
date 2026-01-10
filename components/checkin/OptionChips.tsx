@@ -23,7 +23,7 @@ export default function OptionChips({ options, selectedValue, onSelect }: Option
                             styles.chip,
                             {
                                 backgroundColor: isSelected ? '#000000' : '#121212',
-                                borderColor: isSelected ? colors.primary : 'rgba(255,255,255,0.05)'
+                                borderColor: isSelected ? colors.primary : colors.borderLight
                             }
                         ]}
                         activeOpacity={0.8}

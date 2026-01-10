@@ -378,13 +378,30 @@ export default function DailyCheckinScreen() {
         );
     }
 
+    if (questions.length === 0 && !loadingQuestions) {
+        return (
+            <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+                <View style={{ flex: 1, padding: 24, alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ fontSize: 48, marginBottom: 16 }}>🌱</Text>
+                    <Text style={[styles.questionText, { color: colors.text, textAlign: 'center' }]}>No check-in needed right now</Text>
+                    <Text style={[styles.helpText, { color: colors.textMuted, textAlign: 'center' }]}>
+                        We've analyzed your recent vitals and everything looks steady. Check back later or tomorrow!
+                    </Text>
+                    <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
+                        <Text style={{ color: colors.primary, fontSize: 16, fontWeight: '600' }}>← Go Home</Text>
+                    </TouchableOpacity>
+                </View>
+            </SafeAreaView>
+        );
+    }
+
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
             {/* Header with Pillar Badge */}
             <View style={styles.header}>
                 <View style={[styles.pillarBadge, { backgroundColor: `${colors.primary}15` }]}>
                     <Text style={[styles.pillarName, { color: colors.primary }]}>
-                        {getPillarName(currentQuestion.pillar)}
+                        {getPillarName(currentQuestion?.pillar || 'general')}
                     </Text>
                 </View>
 

@@ -1,11 +1,9 @@
 import { aiPromptService, HealthPrompt } from '@/lib/AIPromptService';
 import { chatSessionService } from '@/lib/chatSessionService';
-import { interpretClinicalDocument } from '@/lib/openAIHealthService';
 import { supabase } from '@/lib/supabaseClient';
 import { useTheme } from '@/lib/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -54,8 +52,6 @@ export default function AIHealthAssistant() {
   const [inputMessage, setInputMessage] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [selectedImageBase64, setSelectedImageBase64] = useState<string | null>(null);
   const [proactivePrompts, setProactivePrompts] = useState<HealthPrompt[]>([]);
   const [isLoadingPrompts, setIsLoadingPrompts] = useState(false);
 
@@ -195,28 +191,9 @@ export default function AIHealthAssistant() {
     }
   };
 
-  const handlePickImage = async () => {
-    // ... same logic, shortened for this replace
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.8,
-        base64: true,
-      });
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        setSelectedImage(result.assets[0].uri);
-        setSelectedImageBase64(result.assets[0].base64 || null);
-      }
-    } catch (e) { Alert.alert('Error picking image'); }
-  };
 
   const handleSendMessage = async () => {
-    if ((!inputMessage.trim() && !selectedImage) || isSendingMessage || !userId) return;
-
     const messageText = inputMessage.trim();
-    const hasImage = !!selectedImage;
-    const imageBase64 = selectedImageBase64;
 
     const tempUserMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -224,55 +201,36 @@ export default function AIHealthAssistant() {
       content: messageText,
       created_at: new Date().toISOString(),
       shouldAnimate: true, // Animate user message too!
-      imageUri: selectedImage || undefined
     };
 
     setChatMessages(prev => [...prev, tempUserMsg]);
     setInputMessage('');
-    setSelectedImage(null);
-    setSelectedImageBase64(null);
     setIsSendingMessage(true);
 
     try {
-      if (hasImage && imageBase64) {
-        let activeSessionId = currentSessionId;
-        if (!activeSessionId) {
-          activeSessionId = await chatSessionService.createSession(userId, "Clinical Analysis");
-          setCurrentSessionId(activeSessionId);
-          setSessions(await chatSessionService.getUserSessions(userId));
-        }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
-        const analysis = await interpretClinicalDocument(userId, imageBase64, "Uploaded Document");
-        const aiResponseText = analysis
-          ? `**Summary:** ${analysis.summary}\n\n**Findings:**\n${analysis.keyFindings.map(f => `- ${f}`).join('\n')}`
-          : "Could not analyze image.";
+      const result = await chatSessionService.sendMessage(userId, currentSessionId, messageText, controller.signal);
 
-        const aiMessage: ChatMessage = {
-          id: Date.now().toString(),
-          role: 'assistant',
-          content: aiResponseText,
-          created_at: new Date().toISOString(),
-          shouldAnimate: true
-        };
-        setChatMessages(prev => [...prev, aiMessage]);
-
-      } else {
-        const result = await chatSessionService.sendMessage(userId, currentSessionId, messageText);
-
-        if (!currentSessionId) {
-          setCurrentSessionId(result.sessionId);
-          setSessions(await chatSessionService.getUserSessions(userId));
-        }
-
-        setChatMessages(prev => [...prev, {
-          ...(result.assistantMessage as any),
-          shouldAnimate: true
-        }]);
+      if (!currentSessionId) {
+        setCurrentSessionId(result.sessionId);
+        setSessions(await chatSessionService.getUserSessions(userId));
       }
-    } catch (error) {
+
+      setChatMessages(prev => [...prev, {
+        ...(result.assistantMessage as any),
+        shouldAnimate: true
+      }]);
+    } catch (error: any) {
+      if (error.name === 'AbortError' || error.message === 'Aborted') {
+        console.log('Chat message aborted');
+        return;
+      }
       Alert.alert('Error', 'Failed to send message.');
     } finally {
       setIsSendingMessage(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -381,19 +339,8 @@ export default function AIHealthAssistant() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         style={styles.keyboardContainer}
       >
-        {selectedImage && (
-          <View style={styles.imagePreviewContainer}>
-            <Image source={{ uri: selectedImage }} style={styles.imagePreview} />
-            <TouchableOpacity onPress={() => { setSelectedImage(null); setSelectedImageBase64(null); }} style={styles.removeImageButton}>
-              <Ionicons name="close-circle" size={24} color="#FF453A" />
-            </TouchableOpacity>
-          </View>
-        )}
 
         <View style={[styles.inputContainer, { borderTopColor: 'rgba(255,255,255,0.05)', backgroundColor: colors.background }]}>
-          <TouchableOpacity onPress={handlePickImage} style={styles.attachButton}>
-            <Ionicons name="camera-outline" size={24} color={colors.primary} />
-          </TouchableOpacity>
 
           <TextInput
             ref={inputRef}
@@ -414,10 +361,10 @@ export default function AIHealthAssistant() {
           ) : (
             <TouchableOpacity
               onPress={handleSendMessage}
-              disabled={(!inputMessage.trim() && !selectedImage) || isSendingMessage}
+              disabled={!inputMessage.trim() || isSendingMessage}
               style={styles.sendButton}
             >
-              <Ionicons name="arrow-up" size={24} color={(inputMessage.trim() || selectedImage) ? colors.primary : colors.textLight} />
+              <Ionicons name="arrow-up" size={24} color={inputMessage.trim() ? colors.primary : colors.textLight} />
             </TouchableOpacity>
           )}
         </View>

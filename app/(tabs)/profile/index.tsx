@@ -53,7 +53,6 @@ export default function ProfileScreen() {
   const menuItems = [
     { label: 'Clinical Bio-Data', icon: 'finger-print', route: '/clinical-biodata' },
     { label: 'Pharmacological Regimen', icon: 'medical', route: '/medication' },
-    { label: 'Clinical Documents', icon: 'document-attach', route: '/clinical-documents' },
     { label: 'Sensor Integration', icon: 'watch', route: '/connect-device' },
     { label: 'System Disclaimer', icon: 'document-text', route: '/disclaimer' },
     { label: 'Support Terminal', icon: 'help-buoy', route: null },

@@ -361,7 +361,8 @@ export async function generateDoctorReviewSummary(userId: string): Promise<any> 
 export async function chatWithHealthAI(
   userId: string,
   message: string,
-  conversationHistory: Array<{ role: string; content: string }> = []
+  conversationHistory: Array<{ role: string; content: string }> = [],
+  signal?: AbortSignal
 ): Promise<{
   message: string;
   reasoning?: string;
@@ -474,7 +475,8 @@ export async function chatWithHealthAI(
         messages: messages,
         temperature: 0.7,
         max_tokens: 800
-      })
+      }),
+      signal: signal
     });
 
     if (!response.ok) {
@@ -809,41 +811,4 @@ async function logValidationFailure(
   }
 }
 
-// ==================== INTERPRET CLINICAL DOCUMENT ====================
-
-export async function interpretClinicalDocument(
-  userId: string,
-  base64Image: string,
-  fileName: string
-): Promise<{
-  summary: string;
-  keyFindings: string[];
-  recommendations: string[];
-  urgency: 'low' | 'medium' | 'high';
-} | null> {
-  try {
-    console.log(`Analyzing document: ${fileName} for user: ${userId}`);
-
-    const { data, error: functionError } = await supabase.functions.invoke(EDGE_FUNCTION_NAME, {
-      body: {
-        action: 'interpret_document',
-        userId,
-        payload: {
-          fileName,
-          documentData: base64Image
-        }
-      }
-    });
-
-    if (functionError) {
-      console.error('Edge Function error:', functionError);
-      return null;
-    }
-
-    return data;
-  } catch (error) {
-    console.error('Error interpreting document:', error);
-    return null;
-  }
-}
 

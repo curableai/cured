@@ -327,7 +327,8 @@ Concise summary:`;
     async sendMessage(
         userId: string,
         sessionId: string | null,
-        userMessage: string
+        userMessage: string,
+        signal?: AbortSignal
     ): Promise<{
         sessionId: string;
         userMessageId: string;
@@ -360,7 +361,7 @@ Concise summary:`;
             console.log(`📊 Context size: ${smartContext.length} items (instead of potentially 50+)`);
 
             // Call AI with optimized context
-            const aiResponse = await chatWithHealthAI(userId, userMessage, smartContext);
+            const aiResponse = await chatWithHealthAI(userId, userMessage, smartContext, signal);
 
             // Save assistant message
             const { data: assistantMsg, error: assistantMsgError } = await supabase

@@ -30,7 +30,10 @@ interface OnboardingData {
   chronic_conditions: string[];
   long_term_medications: string;
   family_history: string[];
+  genotype: string;
 }
+
+const GENOTYPES = ['AA', 'AS', 'AC', 'SS', 'SC'];
 
 const CHRONIC_CONDITIONS = [
   'Hypertension', 'Diabetes', 'Asthma', 'Sickle Cell', 'Heart Disease',
@@ -61,7 +64,8 @@ export default function Onboarding() {
     alcohol_drinker: false,
     chronic_conditions: [],
     long_term_medications: '',
-    family_history: []
+    family_history: [],
+    genotype: ''
   });
 
   const totalSteps = 4;
@@ -152,7 +156,8 @@ export default function Onboarding() {
           alcohol_drinker: data.alcohol_drinker,
           chronic_conditions: data.chronic_conditions,
           long_term_medications: data.long_term_medications.split('\n').filter((x: string) => x.trim()),
-          family_history: data.family_history
+          family_history: data.family_history,
+          genotype: data.genotype || null
         });
 
       if (onboardingError) throw onboardingError;
@@ -233,6 +238,17 @@ export default function Onboarding() {
               capturedAt: now
             }));
           });
+        }
+
+        if (data.genotype) {
+          signalsToCapture.push(clinicalSignalService.captureSignal({
+            signalId: 'genotype',
+            value: data.genotype.toLowerCase(),
+            unit: 'n/a',
+            source: 'onboarding',
+            context: {},
+            capturedAt: now
+          }));
         }
 
         await Promise.all(signalsToCapture);
@@ -476,6 +492,27 @@ export default function Onboarding() {
                 value={data.location}
                 onChangeText={(text) => handleInputChange('location', text)}
               />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: colors.text }]}>Genotype</Text>
+              <View style={styles.bloodGroupGrid}>
+                {GENOTYPES.map((gt) => (
+                  <TouchableOpacity
+                    key={gt}
+                    style={[
+                      styles.bloodGroupButton,
+                      { backgroundColor: '#121212', borderColor: data.genotype === gt ? colors.primary : '#333' }
+                    ]}
+                    onPress={() => handleInputChange('genotype', gt)}
+                  >
+                    <Text style={[
+                      styles.bloodGroupText,
+                      { color: data.genotype === gt ? colors.primary : colors.textMuted }
+                    ]}>{gt}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
           </View>
         );
