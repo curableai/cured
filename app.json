@@ -115,10 +115,14 @@
         {
           "ios": {
             "useFrameworks": "static"
+          },
+          "android": {
+            "minSdkVersion": 26
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -128,15 +132,15 @@
       "router": {
         "origin": false
       },
-      "eas": {
-        "projectId": "dae8d61f-c365-4ed5-87b9-9ebe646801fa"
-      },
       "supabaseUrl": "https://xyqagdrhbrjtmxcftlfs.supabase.co",
-      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh5cWFnZHJoYnJqdG14Y2Z0bGZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY0OTMwNTIsImV4cCI6MjA3MjA2OTA1Mn0.ctkWX6M1tKVLtYp5bMJb81MvWSw79l4-pRKmWnOziAQ"
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh5cWFnZHJoYnJqdG14Y2Z0bGZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY0OTMwNTIsImV4cCI6MjA3MjA2OTA1Mn0.ctkWX6M1tKVLtYp5bMJb81MvWSw79l4-pRKmWnOziAQ",
+      "eas": {
+        "projectId": "44c1e350-dd81-4fd9-85ec-40aab6e47a20"
+      }
     },
     "runtimeVersion": {
       "policy": "sdkVersion"
     },
-    "owner": "davezuggy"
+    "owner": "desmond18"
   }
 }
