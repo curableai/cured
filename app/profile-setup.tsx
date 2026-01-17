@@ -1,3 +1,4 @@
+import { useAuthStore } from '@/lib/authStore';
 import { supabase } from '@/lib/supabaseClient';
 import { useTheme } from '@/lib/theme';
 import { clinicalSignalService } from '@/services/clinicalSignalCapture';
@@ -17,6 +18,7 @@ import {
   View
 } from 'react-native';
 
+
 interface OnboardingData {
   full_name: string;
   date_of_birth: string;
@@ -27,9 +29,12 @@ interface OnboardingData {
   blood_group: string;
   smoker: boolean;
   alcohol_drinker: boolean;
+  other_behavioral_factors: string;
   chronic_conditions: string[];
+  other_chronic_conditions: string;
   long_term_medications: string;
   family_history: string[];
+  other_family_history: string;
   genotype: string;
 }
 
@@ -50,6 +55,7 @@ const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 export default function Onboarding() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { setHasCompletedOnboarding } = useAuthStore();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<OnboardingData>({
@@ -62,17 +68,68 @@ export default function Onboarding() {
     blood_group: '',
     smoker: false,
     alcohol_drinker: false,
+    other_behavioral_factors: '',
     chronic_conditions: [],
+    other_chronic_conditions: '',
     long_term_medications: '',
     family_history: [],
+    other_family_history: '',
     genotype: ''
   });
 
   const totalSteps = 4;
+  const [heightUnit, setHeightUnit] = useState<'cm' | 'ft'>('cm');
+  const [feet, setFeet] = useState('');
+  const [inches, setInches] = useState('');
 
   const handleInputChange = (field: keyof OnboardingData, value: any) => {
     setData(prev => ({ ...prev, [field]: value }));
   };
+
+  const handleHeightUnitChange = (unit: 'cm' | 'ft') => {
+    if (unit === heightUnit) return;
+    setHeightUnit(unit);
+
+    // Convert current value
+    if (unit === 'ft') {
+      // CM to FT/IN
+      if (data.height_cm) {
+        const cm = parseFloat(data.height_cm);
+        const totalInches = cm / 2.54;
+        const ft = Math.floor(totalInches / 12);
+        const inc = Math.round(totalInches % 12);
+        setFeet(ft.toString());
+        setInches(inc.toString());
+      } else {
+        setFeet('');
+        setInches('');
+      }
+    } else {
+      // FT/IN to CM
+      if (feet || inches) {
+        const ft = parseFloat(feet) || 0;
+        const inc = parseFloat(inches) || 0;
+        const cm = Math.round(((ft * 12) + inc) * 2.54);
+        handleInputChange('height_cm', cm.toString());
+      } else {
+        handleInputChange('height_cm', '');
+      }
+    }
+  };
+
+  const updateHeightFromImperial = (f: string, i: string) => {
+    setFeet(f);
+    setInches(i);
+    const ft = parseFloat(f) || 0;
+    const inc = parseFloat(i) || 0;
+    if (ft > 0 || inc > 0) {
+      const cm = Math.round(((ft * 12) + inc) * 2.54);
+      handleInputChange('height_cm', cm.toString());
+    } else {
+      handleInputChange('height_cm', '');
+    }
+  };
+
 
   const toggleArrayItem = (field: 'chronic_conditions' | 'family_history', item: string) => {
     setData(prev => ({
@@ -131,16 +188,21 @@ export default function Onboarding() {
   };
 
   const submitOnboarding = async () => {
+    console.log('[Onboarding] Starting submission...');
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      console.log('[Onboarding] Fetching user...');
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) console.error('[Onboarding] Auth error:', userError);
 
       if (!user) {
         Alert.alert('Error', 'User not authenticated');
         return;
       }
+      console.log('[Onboarding] User found:', user.id);
 
       // Save onboarding data
+      console.log('[Onboarding] Inserting onboarding data...');
       const { error: onboardingError } = await supabase
         .from('onboarding')
         .insert({
@@ -154,15 +216,23 @@ export default function Onboarding() {
           blood_group: data.blood_group || null,
           smoker: data.smoker,
           alcohol_drinker: data.alcohol_drinker,
+          other_behavioral_factors: data.other_behavioral_factors || null,
           chronic_conditions: data.chronic_conditions,
+          other_chronic_conditions: data.other_chronic_conditions || null,
           long_term_medications: data.long_term_medications.split('\n').filter((x: string) => x.trim()),
           family_history: data.family_history,
+          other_family_history: data.other_family_history || null,
           genotype: data.genotype || null
         });
 
-      if (onboardingError) throw onboardingError;
+      if (onboardingError) {
+        console.error('[Onboarding] Onboarding insert error:', onboardingError);
+        throw onboardingError;
+      }
+      console.log('[Onboarding] Onboarding data saved.');
 
       // Update profile
+      console.log('[Onboarding] Upserting profile...');
       const { error: profileError } = await supabase
         .from('profiles')
         .upsert({
@@ -173,10 +243,16 @@ export default function Onboarding() {
           weight_kg: parseFloat(data.weight_kg)
         });
 
-      if (profileError) throw profileError;
+      if (profileError) {
+        console.error('[Onboarding] Profile upsert error:', profileError);
+        throw profileError;
+      }
+      console.log('[Onboarding] Profile updated.');
+      setHasCompletedOnboarding(true);
 
       // Capture clinical signals
       try {
+        console.log('[Onboarding] Capturing clinical signals...');
         const now = new Date().toISOString();
         const signalsToCapture = [];
 
@@ -229,14 +305,25 @@ export default function Onboarding() {
 
         if (data.chronic_conditions?.length > 0) {
           data.chronic_conditions.forEach(condition => {
-            signalsToCapture.push(clinicalSignalService.captureSignal({
-              signalId: 'chronic_condition',
-              value: condition.toLowerCase(),
-              unit: 'n/a',
-              source: 'onboarding',
-              context: {},
-              capturedAt: now
-            }));
+            if (condition === 'Other' && data.other_chronic_conditions) {
+              signalsToCapture.push(clinicalSignalService.captureSignal({
+                signalId: 'chronic_condition',
+                value: data.other_chronic_conditions.toLowerCase(),
+                unit: 'n/a',
+                source: 'onboarding',
+                context: {},
+                capturedAt: now
+              }));
+            } else if (condition !== 'Other') {
+              signalsToCapture.push(clinicalSignalService.captureSignal({
+                signalId: 'chronic_condition',
+                value: condition.toLowerCase(),
+                unit: 'n/a',
+                source: 'onboarding',
+                context: {},
+                capturedAt: now
+              }));
+            }
           });
         }
 
@@ -252,8 +339,9 @@ export default function Onboarding() {
         }
 
         await Promise.all(signalsToCapture);
+        console.log('[Onboarding] All signals captured.');
       } catch (signalError) {
-        console.error('Failed to capture clinical signals:', signalError);
+        console.error('[Onboarding] Failed to capture clinical signals:', signalError);
       }
 
       Alert.alert(
@@ -268,7 +356,7 @@ export default function Onboarding() {
       );
 
     } catch (error: any) {
-      console.error('Error saving onboarding:', error);
+      console.error('[Onboarding] FINAL CATCH error:', error);
       Alert.alert('Error', error.message || 'Failed to save information');
     } finally {
       setLoading(false);
@@ -303,8 +391,20 @@ export default function Onboarding() {
                 placeholder="YYYY-MM-DD"
                 placeholderTextColor="#666"
                 value={data.date_of_birth}
-                onChangeText={(text) => handleInputChange('date_of_birth', text)}
+                maxLength={10}
                 keyboardType="numeric"
+                onChangeText={(text) => {
+                  const numeric = text.replace(/[^0-9]/g, '');
+                  let formatted = numeric;
+                  if (numeric.length > 4) {
+                    formatted = numeric.slice(0, 4) + '-' + numeric.slice(4);
+                  }
+                  if (numeric.length > 6) {
+                    formatted = formatted.slice(0, 7) + '-' + numeric.slice(6);
+                  }
+                  if (formatted.length > 10) formatted = formatted.slice(0, 10);
+                  handleInputChange('date_of_birth', formatted);
+                }}
               />
             </View>
 
@@ -352,15 +452,67 @@ export default function Onboarding() {
                 />
               </View>
               <View style={styles.halfWidth}>
-                <Text style={[styles.label, { color: colors.text }]}>Height (cm)</Text>
-                <TextInput
-                  style={[styles.input, { backgroundColor: '#121212', borderColor: '#333', color: colors.text }]}
-                  placeholder="170"
-                  placeholderTextColor="#666"
-                  keyboardType="numeric"
-                  value={data.height_cm}
-                  onChangeText={(text) => handleInputChange('height_cm', text)}
-                />
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <Text style={[styles.label, { color: colors.text, marginBottom: 0 }]}>Height</Text>
+                  <View style={{ flexDirection: 'row', backgroundColor: '#222', borderRadius: 8, padding: 2 }}>
+                    <TouchableOpacity
+                      onPress={() => handleHeightUnitChange('cm')}
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 6,
+                        backgroundColor: heightUnit === 'cm' ? colors.primary : 'transparent'
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: heightUnit === 'cm' ? '#000' : '#666' }}>CM</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => handleHeightUnitChange('ft')}
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 6,
+                        backgroundColor: heightUnit === 'ft' ? colors.primary : 'transparent'
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: heightUnit === 'ft' ? '#000' : '#666' }}>FT</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {heightUnit === 'cm' ? (
+                  <TextInput
+                    style={[styles.input, { backgroundColor: '#121212', borderColor: '#333', color: colors.text }]}
+                    placeholder="170"
+                    placeholderTextColor="#666"
+                    keyboardType="numeric"
+                    value={data.height_cm}
+                    onChangeText={(text) => handleInputChange('height_cm', text)}
+                  />
+                ) : (
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <View style={{ flex: 1 }}>
+                      <TextInput
+                        style={[styles.input, { backgroundColor: '#121212', borderColor: '#333', color: colors.text, paddingHorizontal: 8 }]}
+                        placeholder="5'"
+                        placeholderTextColor="#666"
+                        keyboardType="numeric"
+                        value={feet}
+                        onChangeText={(text) => updateHeightFromImperial(text, inches)}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <TextInput
+                        style={[styles.input, { backgroundColor: '#121212', borderColor: '#333', color: colors.text, paddingHorizontal: 8 }]}
+                        placeholder="10''"
+                        placeholderTextColor="#666"
+                        keyboardType="numeric"
+                        value={inches}
+                        onChangeText={(text) => updateHeightFromImperial(feet, text)}
+                      />
+                    </View>
+                  </View>
+                )}
               </View>
             </View>
 
@@ -406,6 +558,17 @@ export default function Onboarding() {
                   {data.alcohol_drinker && <Ionicons name="checkmark" size={12} color="#000" />}
                 </View>
               </TouchableOpacity>
+
+              <View style={{ marginTop: 16 }}>
+                <Text style={[styles.label, { color: colors.text }]}>Other (Optional)</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: '#121212', borderColor: '#333', color: colors.text }]}
+                  placeholder="E.g. Vaping, specific diets..."
+                  placeholderTextColor="#666"
+                  value={data.other_behavioral_factors}
+                  onChangeText={(text) => handleInputChange('other_behavioral_factors', text)}
+                />
+              </View>
             </View>
           </View>
         );
@@ -438,6 +601,19 @@ export default function Onboarding() {
                 </TouchableOpacity>
               ))}
             </View>
+
+            {data.chronic_conditions.includes('Other') && (
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.text }]}>Specify Other Condition(s)</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: '#121212', borderColor: '#333', color: colors.text }]}
+                  placeholder="E.g. Sickle Cell, Arthritis..."
+                  placeholderTextColor="#666"
+                  value={data.other_chronic_conditions}
+                  onChangeText={(text) => handleInputChange('other_chronic_conditions', text)}
+                />
+              </View>
+            )}
 
             <View style={styles.inputGroup}>
               <Text style={[styles.label, { color: colors.text }]}>Active Medications</Text>
@@ -482,6 +658,19 @@ export default function Onboarding() {
                 </TouchableOpacity>
               ))}
             </View>
+
+            {data.family_history.includes('Other') && (
+              <View style={styles.inputGroup}>
+                <Text style={[styles.label, { color: colors.text }]}>Specify Other Family History</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: '#121212', borderColor: '#333', color: colors.text }]}
+                  placeholder="E.g. Autoimmune diseases, Rare conditions..."
+                  placeholderTextColor="#666"
+                  value={data.other_family_history}
+                  onChangeText={(text) => handleInputChange('other_family_history', text)}
+                />
+              </View>
+            )}
 
             <View style={styles.inputGroup}>
               <Text style={[styles.label, { color: colors.text }]}>Geographic Location</Text>
@@ -583,39 +772,178 @@ export default function Onboarding() {
   );
 }
 
+
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  scrollContent: { flexGrow: 1 },
-  content: { flex: 1, paddingHorizontal: 32, paddingTop: 60, paddingBottom: 40 },
-  progressHeader: { marginBottom: 48 },
-  progressText: { fontSize: 12, fontWeight: '500', marginBottom: 12, textAlign: 'center', textTransform: 'uppercase', letterSpacing: 1 },
-  progressBar: { flexDirection: 'row', gap: 6 },
-  progressSegment: { flex: 1, height: 2, borderRadius: 1 },
-  stepContainer: { flex: 1 },
-  stepHeader: { marginBottom: 40 },
-  stepTitle: { fontSize: 28, fontWeight: '700', marginBottom: 8 },
-  stepSubtitle: { fontSize: 15, lineHeight: 22 },
-  inputGroup: { marginBottom: 32 },
-  label: { fontSize: 13, fontWeight: '600', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
-  input: { height: 56, borderWidth: 1, borderRadius: 12, paddingHorizontal: 16, fontSize: 16 },
-  textarea: { height: 120, borderWidth: 1, borderRadius: 12, paddingHorizontal: 16, paddingTop: 16, fontSize: 16, textAlignVertical: 'top' },
-  rowInputs: { flexDirection: 'row', gap: 16, marginBottom: 32 },
-  halfWidth: { flex: 1 },
-  optionsGrid: { flexDirection: 'row', gap: 12 },
-  optionCard: { flex: 1, height: 56, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1 },
-  optionLabel: { fontSize: 15, fontWeight: '600' },
-  bloodGroupGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  bloodGroupButton: { width: '22%', height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 8, borderWidth: 1 },
-  bloodGroupText: { fontSize: 14, fontWeight: '600' },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16, borderBottomWidth: 1 },
-  toggleLabel: { fontSize: 15 },
-  checkbox: { width: 20, height: 20, borderRadius: 4, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  conditionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 32 },
-  conditionChip: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, borderWidth: 1 },
-  conditionChipText: { fontSize: 13, fontWeight: '500' },
-  buttonContainer: { flexDirection: 'row', marginTop: 40 },
-  primaryButton: { height: 56, borderRadius: 16, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  primaryButtonText: { fontSize: 16, fontWeight: '600' },
-  secondaryButton: { width: 80, height: 56, alignItems: 'center', justifyContent: 'center' },
-  secondaryButtonText: { fontSize: 16, fontWeight: '500' },
+  container: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 40,
+  },
+  content: {
+    padding: 24,
+  },
+  progressHeader: {
+    marginBottom: 32,
+  },
+  progressText: {
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  progressBar: {
+    flexDirection: 'row',
+    height: 4,
+    gap: 4,
+  },
+  progressSegment: {
+    flex: 1,
+    borderRadius: 2,
+  },
+  stepContainer: {
+    gap: 24,
+  },
+  stepHeader: {
+    marginBottom: 8,
+  },
+  stepTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  stepSubtitle: {
+    fontSize: 16,
+  },
+  inputGroup: {
+    marginBottom: 20,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  input: {
+    height: 50,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    fontSize: 16,
+  },
+  textarea: {
+    height: 100,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    textAlignVertical: 'top',
+  },
+  rowInputs: {
+    flexDirection: 'row',
+    gap: 16,
+    marginBottom: 20,
+  },
+  halfWidth: {
+    flex: 1,
+  },
+  optionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  optionCard: {
+    flex: 1,
+    minWidth: '30%',
+    height: 50,
+    borderWidth: 1,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  bloodGroupGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  bloodGroupButton: {
+    width: '22%',
+    height: 50,
+    borderWidth: 1,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bloodGroupText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderWidth: 1,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  toggleLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  conditionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 24,
+  },
+  conditionChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  conditionChipText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    marginTop: 32,
+    gap: 16,
+  },
+  primaryButton: {
+    height: 56,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderRadius: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  secondaryButton: {
+    height: 56,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });

@@ -1,5 +1,6 @@
 // lib/chatSessionService.ts
 import { chatWithHealthAI } from './openAIHealthService';
+import { researchService } from './researchService';
 import { supabase } from './supabaseClient';
 
 interface ChatSession {
@@ -361,7 +362,57 @@ Concise summary:`;
             console.log(`📊 Context size: ${smartContext.length} items (instead of potentially 50+)`);
 
             // Call AI with optimized context
-            const aiResponse = await chatWithHealthAI(userId, userMessage, smartContext, signal);
+            let aiResponse = await chatWithHealthAI(userId, userMessage, smartContext, signal);
+
+            // ==================== CHECK FOR TOOL CALLS (RESEARCH) ====================
+            // The AI might return a JSON trigger like { "action": "research", ... }
+            if (aiResponse.message.trim().startsWith('{') && aiResponse.message.trim().endsWith('}')) {
+                try {
+                    const potentialTool = JSON.parse(aiResponse.message.trim());
+
+                    if (potentialTool.action === 'research' && potentialTool.query) {
+                        console.log('🧪 AI Triggered Research:', potentialTool.query);
+
+                        // Execute research
+                        const researchResult = await researchService.performResearch(potentialTool.query);
+
+                        if (researchResult) {
+                            const researchContext = `
+SYSTEM: 🏥 RESEARCH TOOL FINDINGS
+Query: "${researchResult.query}"
+Source: ${researchResult.source}
+Confidence: ${researchResult.confidence}
+Findings:
+${researchResult.findings.map(f => '- ' + f).join('\n')}
+
+INSTRUCTIONS:
+1. Use these findings to answer the user's question.
+2. You MUST include this citation: "According to ${researchResult.source} (${researchResult.source_url})..."
+3. If confidence is low, state that.
+`;
+
+                            // Add the intermediate messages to context for the follow-up
+                            // (We intentionally don't save these to DB to keep the chat history clean)
+                            const updatedContext = [
+                                ...smartContext,
+                                { role: 'assistant', content: aiResponse.message }, // The tool trigger JSON
+                                { role: 'system', content: researchContext }        // The findings
+                            ];
+
+                            console.log('🔄 Re-querying AI with research findings...');
+
+                            // Call AI again with findings
+                            const followUpResponse = await chatWithHealthAI(userId, userMessage, updatedContext, signal);
+
+                            // Use this as the final response
+                            aiResponse = followUpResponse;
+                        }
+                    }
+                } catch (e) {
+                    // Not a JSON object or parsing failed, proceed as normal text
+                    // console.log('Message started with { but was not a valid tool call');
+                }
+            }
 
             // Save assistant message
             const { data: assistantMsg, error: assistantMsgError } = await supabase

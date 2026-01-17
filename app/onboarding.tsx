@@ -2,9 +2,20 @@ import { useTheme } from '@/lib/theme';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+const FeatureItem = ({ icon, title, description, colors }: any) => (
+  <View style={styles.featureItem}>
+    <View style={styles.featureIcon}>
+      <Feather name={icon} size={20} color={colors.primary} />
+    </View>
+    <View style={styles.featureContent}>
+      <Text style={[styles.featureTitle, { color: colors.text }]}>{title}</Text>
+      <Text style={[styles.featureDescription, { color: colors.textMuted }]}>{description}</Text>
+    </View>
+  </View>
+);
 
 const OnboardingScreen = () => {
   const router = useRouter();
@@ -65,17 +76,7 @@ const OnboardingScreen = () => {
   );
 };
 
-const FeatureItem = ({ icon, title, description, colors }: any) => (
-  <View style={styles.featureItem}>
-    <View style={styles.featureIcon}>
-      <Feather name={icon} size={20} color={colors.primary} />
-    </View>
-    <View style={styles.featureContent}>
-      <Text style={[styles.featureTitle, { color: colors.text }]}>{title}</Text>
-      <Text style={[styles.featureDescription, { color: colors.textMuted }]}>{description}</Text>
-    </View>
-  </View>
-);
+
 
 const styles = StyleSheet.create({
   container: {

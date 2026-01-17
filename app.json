@@ -55,7 +55,14 @@
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
-        "android.permission.ACTIVITY_RECOGNITION"
+        "android.permission.ACTIVITY_RECOGNITION",
+        "android.permission.health.READ_STEPS",
+        "android.permission.health.READ_HEART_RATE",
+        "android.permission.health.READ_HEART_RATE_VARIABILITY",
+        "android.permission.health.READ_RESPIRATORY_RATE",
+        "android.permission.health.READ_OXYGEN_SATURATION",
+        "android.permission.health.READ_TOTAL_CALORIES_BURNED",
+        "android.permission.health.READ_SLEEP"
       ],
       "package": "com.curable.mobile"
     },
@@ -98,6 +105,18 @@
             {
               "accessType": "read",
               "recordType": "HeartRate"
+            },
+            {
+              "accessType": "read",
+              "recordType": "HeartRateVariabilityRmssd"
+            },
+            {
+              "accessType": "read",
+              "recordType": "RespiratoryRate"
+            },
+            {
+              "accessType": "read",
+              "recordType": "OxygenSaturation"
             },
             {
               "accessType": "read",

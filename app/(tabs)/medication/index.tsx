@@ -3,6 +3,7 @@ import { analyzeMedicationsWithAI } from '@/lib/openAIHealthService';
 import { supabase } from '@/lib/supabaseClient';
 import { useTheme } from '@/lib/theme';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -11,6 +12,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -24,6 +26,8 @@ interface Medication {
   name: string;
   dosage: string;
   frequency: string;
+  end_date?: string;
+  status?: 'active' | 'completed';
 }
 
 interface AIAnalysis {
@@ -40,10 +44,12 @@ export default function MedicationAnalyzer() {
   const [userId, setUserId] = useState<string>('');
   const [medications, setMedications] = useState<Medication[]>([]);
   const [showInput, setShowInput] = useState(false);
-  const [currentMed, setCurrentMed] = useState<Medication>({ name: '', dosage: '', frequency: '' });
+  const [currentMed, setCurrentMed] = useState<Medication>({ name: '', dosage: '', frequency: '', end_date: undefined });
   const [analysis, setAnalysis] = useState<AIAnalysis | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [userName, setUserName] = useState<string>('');
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+  const [selectedEndDate, setSelectedEndDate] = useState<Date | undefined>(undefined);
 
   useEffect(() => {
     loadUserAndMeds();
@@ -81,10 +87,12 @@ export default function MedicationAnalyzer() {
       if (data) {
         // Map DB fields to local state
         const loadedMeds = data.map(m => ({
-          name: m.medication_name, // Mapping from DB column
+          name: m.medication_name,
           dosage: m.dosage,
           frequency: m.frequency,
-          id: m.id // Keep track of DB ID for deletion
+          end_date: m.end_date,
+          status: m.status || 'active',
+          id: m.id
         }));
         setMedications(loadedMeds);
       }
@@ -102,7 +110,9 @@ export default function MedicationAnalyzer() {
             user_id: userId,
             medication_name: currentMed.name,
             dosage: currentMed.dosage,
-            frequency: currentMed.frequency
+            frequency: currentMed.frequency,
+            end_date: currentMed.end_date || null,
+            status: 'active'
           })
           .select()
           .single();
@@ -114,10 +124,13 @@ export default function MedicationAnalyzer() {
             name: data.medication_name,
             dosage: data.dosage,
             frequency: data.frequency,
+            end_date: data.end_date,
+            status: data.status || 'active',
             id: data.id
           };
           setMedications([...medications, newMed]);
-          setCurrentMed({ name: '', dosage: '', frequency: '' });
+          setCurrentMed({ name: '', dosage: '', frequency: '', end_date: undefined });
+          setSelectedEndDate(undefined);
           setShowInput(false);
           setAnalysis(null);
         }
@@ -175,62 +188,25 @@ export default function MedicationAnalyzer() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={[styles.title, { color: colors.text }]}>Clinical Analyzer</Text>
-          <Text style={[styles.subtitle, { color: colors.text }]}>Pharmacological interaction & safety analysis.</Text>
-        </View>
-
-        {/* List Card */}
-        <View style={[styles.card, { backgroundColor: '#0D0D0D' }]}>
-          <View style={styles.cardHeader}>
-            <Text style={[styles.cardTitle, { color: colors.textMuted }]}>ACTIVE REGIMEN ({medications.length})</Text>
-            <TouchableOpacity
-              onPress={() => setShowInput(!showInput)}
-              style={[styles.addButton, { borderColor: colors.primary, backgroundColor: showInput ? colors.primary : 'transparent' }]}
-            >
-              <Ionicons name={showInput ? "close" : "add"} size={24} color={showInput ? "#fff" : colors.primary} />
-            </TouchableOpacity>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <KeyboardAvoidingView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.header}>
+            <Text style={[styles.title, { color: colors.text }]}>My Medications</Text>
+            <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+              Manage and analyze your current medications and interactions.
+            </Text>
           </View>
 
-          {showInput && (
-            <View style={styles.inputSection}>
-              <TextInput
-                style={[styles.input, { color: colors.text, borderColor: 'rgba(255,255,255,0.1)' }]}
-                placeholder="Medication name"
-                placeholderTextColor={colors.textLight}
-                value={currentMed.name}
-                onChangeText={(text) => setCurrentMed({ ...currentMed, name: text })}
-              />
-              <View style={styles.inputRow}>
-                <TextInput
-                  style={[styles.input, styles.inputHalf, { color: colors.text, borderColor: 'rgba(255,255,255,0.1)' }]}
-                  placeholder="Dosage (e.g. 500mg)"
-                  placeholderTextColor={colors.textLight}
-                  value={currentMed.dosage}
-                  onChangeText={(text) => setCurrentMed({ ...currentMed, dosage: text })}
-                />
-                <TextInput
-                  style={[styles.input, styles.inputHalf, { color: colors.text, borderColor: 'rgba(255,255,255,0.1)' }]}
-                  placeholder="Daily Frequency"
-                  placeholderTextColor={colors.textLight}
-                  value={currentMed.frequency}
-                  onChangeText={(text) => setCurrentMed({ ...currentMed, frequency: text })}
-                />
+          {/* Active Regimen List */}
+          {medications.length > 0 && (
+            <View style={[styles.medicationList, { marginBottom: 32 }]}>
+              <View style={[styles.cardHeader, { marginBottom: 16 }]}>
+                <Text style={[styles.cardTitle, { color: colors.textMuted }]}>ACTIVE REGIMEN ({medications.length})</Text>
               </View>
-              <TouchableOpacity onPress={handleAddMedication} style={[styles.submitButton, { backgroundColor: colors.primary }]}>
-                <Text style={styles.submitButtonText}>Append to Regimen</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {medications.length > 0 ? (
-            <View style={styles.medicationList}>
               {medications.map((med, index) => (
                 <View key={index} style={styles.medItem}>
                   <View style={styles.medInfo}>
@@ -250,75 +226,172 @@ export default function MedicationAnalyzer() {
                 </View>
               ))}
             </View>
-          ) : (
-            !showInput && (
+          )}
+
+          {/* Entry Card */}
+          <View style={[styles.card, { backgroundColor: '#0D0D0D' }]}>
+            <View style={styles.cardHeader}>
+              <Text style={[styles.cardTitle, { color: colors.textMuted }]}>
+                {showInput ? "Entry Terminal" : "Log New Medication"}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setShowInput(!showInput)}
+                style={[styles.addButton, { borderColor: colors.primary, backgroundColor: showInput ? colors.primary : 'transparent' }]}
+              >
+                <Ionicons name={showInput ? "close" : "add"} size={24} color={showInput ? "#fff" : colors.primary} />
+              </TouchableOpacity>
+            </View>
+
+            {
+              showInput && (
+                <>
+                  <View style={styles.inputSection}>
+                    <TextInput
+                      style={[styles.input, { color: colors.text, borderColor: 'rgba(255,255,255,0.1)' }]}
+                      placeholder="Medication name"
+                      placeholderTextColor={colors.textLight}
+                      value={currentMed.name}
+                      onChangeText={(text) => setCurrentMed({ ...currentMed, name: text })}
+                    />
+                    <View style={styles.inputRow}>
+                      <TextInput
+                        style={[styles.input, styles.inputHalf, { color: colors.text, borderColor: 'rgba(255,255,255,0.1)' }]}
+                        placeholder="Dosage (e.g., 500mg)"
+                        placeholderTextColor={colors.textLight}
+                        value={currentMed.dosage}
+                        onChangeText={(text) => setCurrentMed({ ...currentMed, dosage: text })}
+                      />
+                      <TextInput
+                        style={[styles.input, styles.inputHalf, { color: colors.text, borderColor: 'rgba(255,255,255,0.1)' }]}
+                        placeholder="How often? (e.g., Twice daily)"
+                        placeholderTextColor={colors.textLight}
+                        value={currentMed.frequency}
+                        onChangeText={(text) => setCurrentMed({ ...currentMed, frequency: text })}
+                      />
+                    </View>
+                  </View>
+
+                  {/* End Date (Optional) */}
+                  <View style={{ marginTop: 16 }}>
+                    <Text style={[styles.label, { color: colors.text, fontSize: 13, marginBottom: 8 }]}>End Date (Optional)</Text>
+                    <TouchableOpacity
+                      onPress={() => setShowEndDatePicker(true)}
+                      style={[styles.input, { justifyContent: 'center', backgroundColor: '#121212' }]}
+                    >
+                      <Text style={{ color: selectedEndDate ? colors.text : colors.textLight }}>
+                        {selectedEndDate ? selectedEndDate.toLocaleDateString() : 'Tap to set end date'}
+                      </Text>
+                    </TouchableOpacity>
+                    {selectedEndDate && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          setSelectedEndDate(undefined);
+                          setCurrentMed({ ...currentMed, end_date: undefined });
+                        }}
+                        style={{ marginTop: 8 }}
+                      >
+                        <Text style={{ color: colors.primary, fontSize: 14 }}>Clear end date</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {showEndDatePicker && (
+                    <DateTimePicker
+                      value={selectedEndDate || new Date()}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      minimumDate={new Date()}
+                      onChange={(event, date) => {
+                        setShowEndDatePicker(Platform.OS === 'ios');
+                        if (date) {
+                          setSelectedEndDate(date);
+                          setCurrentMed({ ...currentMed, end_date: date.toISOString().split('T')[0] });
+                        }
+                      }}
+                    />
+                  )}
+
+                  <TouchableOpacity onPress={handleAddMedication} style={[styles.submitButton, { backgroundColor: colors.primary }]}>
+                    <Text style={styles.submitButtonText}>Add Medication</Text>
+                  </TouchableOpacity>
+                </>
+              )
+            }
+          </View>
+
+          {
+            medications.length === 0 && !showInput && (
               <View style={styles.emptyContainer}>
                 <Ionicons name="layers-outline" size={48} color="rgba(255,255,255,0.1)" />
                 <Text style={[styles.emptyText, { color: colors.textMuted }]}>No pharmacological data entered.</Text>
               </View>
             )
-          )}
+          }
 
-          {medications.length > 0 && (
-            <TouchableOpacity
-              onPress={handleAnalyze}
-              disabled={analyzing}
-              style={[styles.analyzeButton, { backgroundColor: colors.primary }, analyzing && { opacity: 0.7 }]}
-            >
-              {analyzing ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Text style={styles.analyzeButtonText}>Effect of drug on {userName || 'User'}</Text>
-              )}
-            </TouchableOpacity>
-          )}
-        </View>
+          {
+            medications.length > 0 && (
+              <TouchableOpacity
+                onPress={handleAnalyze}
+                disabled={analyzing}
+                style={[styles.analyzeButton, { backgroundColor: colors.primary }, analyzing && { opacity: 0.7 }]}
+              >
+                {analyzing ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.analyzeButtonText}>Effect of drug on {userName || 'User'}</Text>
+                )}
+              </TouchableOpacity>
+            )
+          }
 
-        {/* AI Results Section */}
-        {analysis && (
-          <View style={styles.results}>
-            <View style={[styles.resultCard, { backgroundColor: '#121212' }]}>
-              <View style={styles.sectionHeader}>
-                <Ionicons name="flash" size={20} color={colors.primary} />
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Insights & Benefits</Text>
-              </View>
-              {analysis.effects.map((item, i) => (
-                <View key={i} style={styles.resultItem}>
-                  <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
-                  <Text style={[styles.resultText, { color: colors.textMuted }]}>{item}</Text>
+          {/* AI Results Section */}
+          {
+            analysis && (
+              <View style={styles.results}>
+                <View style={[styles.resultCard, { backgroundColor: '#121212' }]}>
+                  <View style={styles.sectionHeader}>
+                    <Ionicons name="flash" size={20} color={colors.primary} />
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Insights & Benefits</Text>
+                  </View>
+                  {analysis.effects.map((item, i) => (
+                    <View key={i} style={styles.resultItem}>
+                      <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
+                      <Text style={[styles.resultText, { color: colors.textMuted }]}>{item}</Text>
+                    </View>
+                  ))}
                 </View>
-              ))}
-            </View>
 
-            <View style={[styles.resultCard, { backgroundColor: '#121212' }]}>
-              <View style={styles.sectionHeader}>
-                <Ionicons name="alert-circle" size={20} color="#FFC107" />
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Potential Side Effects</Text>
-              </View>
-              {analysis.sideEffects.map((item, i) => (
-                <View key={i} style={styles.resultItem}>
-                  <Ionicons name="radio-button-on" size={16} color="#FFC107" />
-                  <Text style={[styles.resultText, { color: colors.textMuted }]}>{item}</Text>
+                <View style={[styles.resultCard, { backgroundColor: '#121212' }]}>
+                  <View style={styles.sectionHeader}>
+                    <Ionicons name="alert-circle" size={20} color="#FFC107" />
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Potential Side Effects</Text>
+                  </View>
+                  {analysis.sideEffects.map((item, i) => (
+                    <View key={i} style={styles.resultItem}>
+                      <Ionicons name="radio-button-on" size={16} color="#FFC107" />
+                      <Text style={[styles.resultText, { color: colors.textMuted }]}>{item}</Text>
+                    </View>
+                  ))}
                 </View>
-              ))}
-            </View>
 
-            <LinearGradient
-              colors={['#1A1A1A', '#000000']}
-              style={styles.guideCard}
-            >
-              <View style={styles.sectionHeader}>
-                <Ionicons name="shield-checkmark" size={20} color="#00E676" />
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Safe Usage Guidance</Text>
+                <LinearGradient
+                  colors={['#1A1A1A', '#000000']}
+                  style={styles.guideCard}
+                >
+                  <View style={styles.sectionHeader}>
+                    <Ionicons name="shield-checkmark" size={20} color="#00E676" />
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Safe Usage Guidance</Text>
+                  </View>
+                  {analysis.recommendations.map((item, i) => (
+                    <Text key={i} style={[styles.guideText, { color: colors.textMuted }]}>• {item}</Text>
+                  ))}
+                </LinearGradient>
               </View>
-              {analysis.recommendations.map((item, i) => (
-                <Text key={i} style={[styles.guideText, { color: colors.textMuted }]}>• {item}</Text>
-              ))}
-            </LinearGradient>
-          </View>
-        )}
-      </ScrollView>
-    </KeyboardAvoidingView>
+            )
+          }
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView >
   );
 }
 
@@ -340,6 +413,8 @@ const styles = StyleSheet.create({
   inputHalf: { flex: 1 },
   submitButton: { height: 60, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
   submitButtonText: { color: '#fff', fontSize: 16, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
+
+  label: { fontSize: 14, fontWeight: '600', marginBottom: 4 },
 
   medicationList: { gap: 12 },
   medItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },

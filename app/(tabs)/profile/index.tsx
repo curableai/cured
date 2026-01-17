@@ -93,7 +93,15 @@ export default function ProfileScreen() {
             <TouchableOpacity
               key={index}
               style={[styles.listItem, { backgroundColor: '#0D0D0D' }]}
-              onPress={() => item.route ? router.push(item.route as any) : Alert.alert('Coming Soon', 'This terminal feature is under development.')}
+              onPress={() => {
+                if (item.label === 'Support Terminal') {
+                  Alert.alert('Support Terminal', 'Phone: 08105535057\nEmail: curable4@gmail.com');
+                } else if (item.route) {
+                  router.push(item.route as any);
+                } else {
+                  Alert.alert('Coming Soon', 'This terminal feature is under development.');
+                }
+              }}
             >
               <View style={styles.listItemLeft}>
                 <View style={[styles.iconContainer, { backgroundColor: 'rgba(255,107,0,0.08)' }]}>

@@ -378,3 +378,85 @@ export async function isHealthServiceAvailable(): Promise<boolean> {
     }
     return false;
 }
+/**
+ * Sync health data for any platform (iOS/Android)
+ */
+export async function syncUnifiedHealthData(userId: string): Promise<boolean> {
+    if (Platform.OS === 'android') {
+        const watchData = await fetchAndroidHealthData();
+        if (!watchData) return false;
+        return await captureAndroidSignals(userId, watchData);
+    } else if (Platform.OS === 'ios') {
+        const { syncHealthData } = require('./healthkitManager');
+        return await syncHealthData(userId);
+    }
+    return false;
+}
+
+/**
+ * Capture clinical signals from Android health data
+ */
+async function captureAndroidSignals(userId: string, data: any): Promise<boolean> {
+    try {
+        const now = new Date().toISOString();
+        const signals = [];
+
+        // Steps
+        if (data.steps?.records?.length > 0) {
+            const totalSteps = data.steps.records.reduce((sum: number, r: any) => sum + (r.count || 0), 0);
+            signals.push({ id: 'steps_count', value: totalSteps });
+        }
+
+        // Heart Rate
+        if (data.heartRate?.records?.length > 0) {
+            const latestHR = data.heartRate.records[data.heartRate.records.length - 1];
+            const bpm = latestHR.samples?.[0]?.beatsPerMinute || 0;
+            if (bpm > 0) signals.push({ id: 'heart_rate', value: Math.round(bpm) });
+        }
+
+        // HRV
+        if (data.hrv?.records?.length > 0) {
+            const latestHRV = data.hrv.records[data.hrv.records.length - 1];
+            if (latestHRV.heartRateVariabilityMillis) {
+                signals.push({ id: 'heart_rate_variability', value: Math.round(latestHRV.heartRateVariabilityMillis) });
+            }
+        }
+
+        // SpO2
+        if (data.oxygenSaturation?.records?.length > 0) {
+            const latestSpO2 = data.oxygenSaturation.records[data.oxygenSaturation.records.length - 1];
+            if (latestSpO2.percentage) {
+                signals.push({ id: 'blood_oxygen', value: Math.round(latestSpO2.percentage * 100) });
+            }
+        }
+
+        // Sleep
+        if (data.sleep?.records?.length > 0) {
+            let totalSleepMs = 0;
+            data.sleep.records.forEach((s: any) => {
+                if (s.startTime && s.endTime) {
+                    totalSleepMs += new Date(s.endTime).getTime() - new Date(s.startTime).getTime();
+                }
+            });
+            const sleepHours = totalSleepMs / (1000 * 60 * 60);
+            if (sleepHours > 0) signals.push({ id: 'sleep_duration', value: sleepHours });
+        }
+
+        const { clinicalSignalService } = require('@/services/clinicalSignalCapture');
+        await Promise.all(
+            signals.map(s =>
+                clinicalSignalService.captureSignal({
+                    signalId: s.id,
+                    value: s.value,
+                    source: 'device_health_connect',
+                    capturedAt: now
+                })
+            )
+        );
+
+        return true;
+    } catch (error) {
+        console.error('[HealthConnect] Signal capture error:', error);
+        return false;
+    }
+}

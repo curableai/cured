@@ -1,9 +1,16 @@
 // components/HealthSyncButton.tsx
-import { requestHealthKitPermissions, syncHealthData } from '@/lib/healthkitManager';
+import {
+  checkHealthConnectAvailability,
+  openHealthConnectStore,
+  requestHealthConnectPermissions,
+  SdkAvailabilityStatus,
+} from '@/lib/healthConnect';
+import { requestHealthKitPermissions } from '@/lib/healthkitManager';
 import { supabase } from '@/lib/supabaseClient';
+import { syncUnifiedHealthData } from '@/lib/unifiedHealthService';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, Text } from 'react-native';
 
 interface HealthSyncButtonProps {
   variant?: 'primary' | 'secondary';
@@ -15,6 +22,16 @@ export default function HealthSyncButton({
   fullWidth = false
 }: HealthSyncButtonProps) {
   const [syncing, setSyncing] = useState(false);
+
+  const showConnectionGuide = () => {
+    Alert.alert(
+      'Android Watch Connection Guide',
+      '1. Wear OS (Samsung, Pixel): Syncs directly to Health Connect.\n\n' +
+      '2. Other Watches (Oraimo, Fitbit, etc): Connect your watch app (e.g., Oraimo Health) to Google Fit, then link Google Fit to Health Connect.\n\n' +
+      '3. Ensure all permissions are on in the Health Connect app.',
+      [{ text: 'Got it' }]
+    );
+  };
 
   const handleSync = async () => {
     setSyncing(true);
@@ -28,22 +45,62 @@ export default function HealthSyncButton({
         return;
       }
 
+      // Android Pre-checks
+      if (Platform.OS === 'android') {
+        const status = await checkHealthConnectAvailability();
+
+        if (status === SdkAvailabilityStatus.SDK_UNAVAILABLE) {
+          Alert.alert(
+            'Health Connect Required',
+            'To sync your watch, you need to install the Google Health Connect app. Most watches (Samsung, Google Pixel, Oraimo) sync through this hub.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'How to Connect?', onPress: showConnectionGuide },
+              { text: 'Install App', onPress: () => openHealthConnectStore() }
+            ]
+          );
+          return;
+        }
+
+        if (status === SdkAvailabilityStatus.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED) {
+          Alert.alert(
+            'Update Required',
+            'Please update Health Connect in the Play Store to continue.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Update', onPress: () => openHealthConnectStore() }
+            ]
+          );
+          return;
+        }
+      }
+
       // Try to sync data
-      const success = await syncHealthData(user.id);
+      const success = await syncUnifiedHealthData(user.id);
 
       if (success) {
         Alert.alert('Success', 'Health data synced successfully! 🎉');
       } else {
         // If sync failed, might be permissions issue
+        const platformName = Platform.OS === 'ios' ? 'Apple Health (HealthKit)' : 'Google Health Connect';
+
         Alert.alert(
           'Sync Failed',
-          'Unable to sync health data. Would you like to check HealthKit permissions?',
+          `Unable to sync data from ${platformName}. Would you like to check permissions?`,
           [
             { text: 'Cancel', style: 'cancel' },
+            { text: 'How to Connect?', onPress: showConnectionGuide },
             {
               text: 'Check Permissions',
               onPress: async () => {
-                await requestHealthKitPermissions(undefined, true);
+                if (Platform.OS === 'ios') {
+                  await requestHealthKitPermissions(undefined, true);
+                } else {
+                  const granted = await requestHealthConnectPermissions();
+                  if (!granted) {
+                    Alert.alert('Permissions Required', 'Please enable all health permissions in the Health Connect app to sync your data.');
+                  }
+                }
               },
             },
           ]

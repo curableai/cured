@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import {
+    SafeAreaView,
     ScrollView,
     StyleSheet,
     Text,
@@ -16,7 +17,7 @@ export default function InsightsScreen() {
     const { colors } = useTheme();
 
     return (
-        <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
             <ScrollView
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
@@ -40,7 +41,7 @@ export default function InsightsScreen() {
                 </TouchableOpacity>
 
             </ScrollView>
-        </View>
+        </SafeAreaView>
     );
 }
 

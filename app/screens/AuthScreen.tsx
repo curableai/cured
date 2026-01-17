@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useTheme } from '@/lib/theme';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -30,26 +30,39 @@ export default function AuthScreen() {
 
   useEffect(() => { checkExistingSession(); }, []);
 
+  const redirectUser = async (userId: string) => {
+    try {
+      // Check if user is a doctor
+      const { data: doctor } = await supabase.from('doctors').select('id').eq('user_id', userId).maybeSingle();
+      // if (doctor) { router.replace('/(doctor)/dashboard'); return; }//
+
+      // Check if profile exists and onboarding is completed
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('onboarding_completed')
+        .eq('id', userId)
+        .maybeSingle();
+
+      // If profile doesn't exist or onboarding not completed, go to profile setup
+      if (!profile || !profile.onboarding_completed) {
+        router.replace('/profile-setup');
+        return;
+      }
+
+      // Profile exists and onboarding completed, go to main app
+      router.replace('/(tabs)');
+    } catch (err) {
+      console.error('Error checking user profile:', err);
+      // On error, default to profile setup to be safe
+      router.replace('/profile-setup');
+    }
+  };
+
   const checkExistingSession = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) await redirectUser(session.user.id);
     } catch (err) { console.log('No existing session'); }
-  };
-
-  const redirectUser = async (userId: string) => {
-    try {
-      const { data: doctor } = await supabase.from('doctors').select('id').eq('user_id', userId).single();
-     // if (doctor) { router.replace('/(doctor)/dashboard'); return; }//
-
-      const { data: profile } = await supabase.from('profiles').select('onboarding_completed').eq('id', userId).single();
-
-      if (!profile || !profile.onboarding_completed) {
-        router.replace('/profile-setup');
-      } else {
-        router.replace('/(tabs)');
-      }
-    } catch (err) { router.replace('/(tabs)'); }
   };
 
   const handleSignUp = async () => {
@@ -61,15 +74,40 @@ export default function AuthScreen() {
     setLoading(true);
     try {
       const { data, error: signUpError } = await supabase.auth.signUp({
-        email: email.trim().toLowerCase(), password,
-        options: { data: { email: email.trim().toLowerCase() } }
+        email: email.trim().toLowerCase(),
+        password,
+        options: {
+          data: { email: email.trim().toLowerCase() },
+          emailRedirectTo: undefined // No email confirmation needed
+        }
       });
-      if (signUpError) { setError(signUpError.message); setLoading(false); return; }
-      if (data.user && !data.session) {
-        Alert.alert('Verification Required', 'Please check your email to verify your account.', [{ text: 'OK' }]);
+
+      if (signUpError) {
+        setError(signUpError.message);
+        setLoading(false);
+        return;
+      }
+
+      // Account created successfully
+      if (data.user) {
+        Alert.alert(
+          'Account Created!',
+          'Your account has been created successfully. You can now sign in with your credentials.',
+          [{
+            text: 'Sign In Now',
+            onPress: () => {
+              setIsSignUp(false);
+              setPassword('');
+              setConfirmPassword('');
+            }
+          }]
+        );
         setLoading(false);
       }
-    } catch (err) { setError('System error. Please try again.'); setLoading(false); }
+    } catch (err) {
+      setError('System error. Please try again.');
+      setLoading(false);
+    }
   };
 
   const handleSignIn = async () => {

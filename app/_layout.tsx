@@ -1,5 +1,6 @@
 // app/_layout.tsx
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { useAuthStore } from '@/lib/authStore';
 import { handleNotificationResponse, requestNotificationPermissions, scheduleDailyCheckin } from '@/lib/checkinNotification';
 import { initializeHealthKit } from '@/lib/healthkitManager';
 import { supabase } from '@/lib/supabaseClient';
@@ -20,6 +21,7 @@ export default function RootLayout() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [userRole, setUserRole] = useState<'patient' | 'doctor' | null>(null);
+  const { hasCompletedOnboarding, setHasCompletedOnboarding } = useAuthStore();
 
   // Initialize app on mount
   useEffect(() => {
@@ -58,9 +60,21 @@ export default function RootLayout() {
             .single();
 
           setUserRole(doctor ? 'doctor' : 'patient');
+
+          // Check onboarding status
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('onboarding_completed')
+            .eq('id', session.user.id)
+            .single();
+
+          setHasCompletedOnboarding(!!profile?.onboarding_completed);
+          console.log('Onboarding status:', !!profile?.onboarding_completed);
+
         } else if (event === 'SIGNED_OUT') {
           setIsAuthenticated(false);
           setUserRole(null);
+          setHasCompletedOnboarding(false);
         }
       }
     );
@@ -88,9 +102,21 @@ export default function RootLayout() {
           .single();
 
         setUserRole(doctor ? 'doctor' : 'patient');
+
+        // Check onboarding status
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('onboarding_completed')
+          .eq('id', user.id)
+          .single();
+
+        setHasCompletedOnboarding(!!profile?.onboarding_completed);
+        console.log('App init onboarding status:', !!profile?.onboarding_completed);
+
       } else {
         setIsAuthenticated(false);
         setUserRole(null);
+        setHasCompletedOnboarding(false);
         console.log('No authenticated user');
       }
     } catch (error) {
@@ -115,25 +141,32 @@ export default function RootLayout() {
       const inAuthScreen = currentRoute === 'login';
       const inDoctorGroup = (currentRoute as any) === '(doctor)';
       const inPatientGroup = (currentRoute as any) === '(tabs)';
+      const inProfileSetup = currentRoute === 'profile-setup';
 
-      if (inAuthScreen) {
-        // Redirect away from auth screens after login
-        if (userRole === 'doctor') {
+      if (userRole === 'doctor') {
+        if (inAuthScreen || (!inDoctorGroup && !inProfileSetup)) {
           router.replace('/(doctor)/dashboard' as any);
-        } else {
-          router.replace('/ai-assistant');
         }
-      } else if (userRole === 'doctor' && inPatientGroup) {
-        // Doctor accidentally in patient area
-        router.replace('/(doctor)/dashboard' as any);
-      } else if (userRole === 'patient' && inDoctorGroup) {
-        // Patient accidentally in doctor area
-        router.replace('/ai-assistant');
+      } else {
+        // Patient Role
+        if (!hasCompletedOnboarding) {
+          // If not completed onboarding, force to profile-setup
+          if (currentRoute !== 'profile-setup') {
+            router.replace('/profile-setup');
+          }
+        } else {
+          // Onboarding complete
+          if (inAuthScreen || inProfileSetup) {
+            router.replace('/ai-assistant');
+          } else if (inDoctorGroup) {
+            router.replace('/ai-assistant');
+          }
+        }
       }
     }
     // Unauthenticated users can freely browse the app (index.tsx)
     // They'll be prompted to login when they try to access features
-  }, [isInitializing, isAuthenticated, userRole, segments]);
+  }, [isInitializing, isAuthenticated, userRole, hasCompletedOnboarding, segments]);
 
   if (isInitializing) {
     return (

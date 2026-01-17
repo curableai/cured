@@ -91,10 +91,22 @@ export const readHealthData = async () => {
 
     try {
         const now = new Date();
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+
         const yesterday = new Date();
         yesterday.setDate(now.getDate() - 1);
 
-        const timeRangeFilter = {
+        // For cumulative metrics (Steps, Calories, Sleep), use "Since Midnight"
+        const dailyTimeRange = {
+            operator: 'between' as const,
+            startTime: startOfDay.toISOString(),
+            endTime: now.toISOString(),
+        };
+
+        // For instantaneous metrics (HR, SpO2, HRV, Resp Rate), use "Last 24h" to find the latest
+        // This ensures we get a value even if the user hasn't measured it *today* yet.
+        const recentTimeRange = {
             operator: 'between' as const,
             startTime: yesterday.toISOString(),
             endTime: now.toISOString(),
@@ -109,13 +121,13 @@ export const readHealthData = async () => {
             oxygenSaturation,
             calories,
         ] = await Promise.all([
-            readRecords('Steps', { timeRangeFilter }),
-            readRecords('HeartRate', { timeRangeFilter }),
-            readRecords('HeartRateVariabilityRmssd', { timeRangeFilter }),
-            readRecords('SleepSession', { timeRangeFilter }),
-            readRecords('RespiratoryRate', { timeRangeFilter }),
-            readRecords('OxygenSaturation', { timeRangeFilter }),
-            readRecords('TotalCaloriesBurned', { timeRangeFilter }),
+            readRecords('Steps', { timeRangeFilter: dailyTimeRange }),
+            readRecords('HeartRate', { timeRangeFilter: recentTimeRange }),
+            readRecords('HeartRateVariabilityRmssd', { timeRangeFilter: recentTimeRange }),
+            readRecords('SleepSession', { timeRangeFilter: dailyTimeRange }),
+            readRecords('RespiratoryRate', { timeRangeFilter: recentTimeRange }),
+            readRecords('OxygenSaturation', { timeRangeFilter: recentTimeRange }),
+            readRecords('TotalCaloriesBurned', { timeRangeFilter: dailyTimeRange }),
         ]);
 
         return {
