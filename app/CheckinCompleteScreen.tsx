@@ -13,6 +13,7 @@ import {
     ScrollView,
     StyleSheet,
     Text,
+    TouchableOpacity,
     View
 } from 'react-native';
 
@@ -145,6 +146,16 @@ export default function CheckinCompleteScreen() {
                     )}
                 </View>
 
+                {/* Actions */}
+                <View style={styles.actions}>
+                    <TouchableOpacity
+                        style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+                        onPress={() => router.replace('/(tabs)')}
+                    >
+                        <Ionicons name="home" size={20} color="#FFF" />
+                        <Text style={styles.primaryButtonText}>Return to Dashboard</Text>
+                    </TouchableOpacity>
+                </View>
 
             </ScrollView>
         </SafeAreaView>

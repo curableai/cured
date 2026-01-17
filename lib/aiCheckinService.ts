@@ -38,7 +38,8 @@ class AICheckinService {
 USER PROFILE:
 - Age: ${context.age || 'Unknown'}
 - Gender: ${context.gender || 'Unknown'}
-- Chronic Conditions: ${context.chronicConditions?.join(', ') || 'None'}
+- Chronic Conditions: ${context.chronicConditions?.join(', ') || 'None'}${context.otherChronicConditions ? ` (Other: ${context.otherChronicConditions})` : ''}
+- Behavioral Factors: ${context.smoker ? 'Smoker' : 'Non-smoker'}, ${context.alcoholDrinker ? 'Alcohol' : 'No alcohol'}${context.otherBehavioralFactors ? `, Other: ${context.otherBehavioralFactors}` : ''}
 - Current Medications: ${context.medications?.join(', ') || 'None'}
 - Genotype: ${context.genotype || 'Unknown'}
 
@@ -123,6 +124,10 @@ Return ONLY this JSON format:
             context.age = onboarding?.age;
             context.gender = onboarding?.gender;
             context.chronicConditions = onboarding?.chronic_conditions || [];
+            context.otherChronicConditions = onboarding?.other_chronic_conditions;
+            context.smoker = onboarding?.smoker;
+            context.alcoholDrinker = onboarding?.alcohol_drinker;
+            context.otherBehavioralFactors = onboarding?.other_behavioral_factors;
             context.genotype = onboarding?.genotype;
 
             // 2. Fetch medications

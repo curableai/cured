@@ -43,9 +43,9 @@ export default function IndexScreen() {
             colors={colors}
           />
           <FeatureBox
-            icon="bar-chart-2"
-            title="Predictive Models"
-            description="Proprietary AI models to identify potential physiological deviations early."
+            icon="message-circle"
+            title="AI Health Partner"
+            description="Conversational health assistant for personalized insights and guidance."
             colors={colors}
           />
         </View>

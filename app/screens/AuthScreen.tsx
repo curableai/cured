@@ -16,6 +16,7 @@ import {
   View,
 } from 'react-native';
 
+
 export default function AuthScreen() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -42,6 +43,19 @@ export default function AuthScreen() {
         .select('onboarding_completed')
         .eq('id', userId)
         .maybeSingle();
+
+      // Check T&C acceptance
+      const { data: acceptance } = await supabase
+        .from('disclaimer_acceptances')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('disclaimer_type', 'TERMS_AND_CONDITIONS')
+        .maybeSingle();
+
+      if (!acceptance) {
+        router.replace('/terms-conditions');
+        return;
+      }
 
       // If profile doesn't exist or onboarding not completed, go to profile setup
       if (!profile || !profile.onboarding_completed) {
@@ -78,7 +92,7 @@ export default function AuthScreen() {
         password,
         options: {
           data: { email: email.trim().toLowerCase() },
-          emailRedirectTo: undefined // No email confirmation needed
+          emailRedirectTo: 'curablemobile://auth-callback',
         }
       });
 
@@ -91,10 +105,10 @@ export default function AuthScreen() {
       // Account created successfully
       if (data.user) {
         Alert.alert(
-          'Account Created!',
-          'Your account has been created successfully. You can now sign in with your credentials.',
+          'Confirmation Email Sent!',
+          'Please check your email and click the confirmation link to activate your account.',
           [{
-            text: 'Sign In Now',
+            text: 'I Confirmed',
             onPress: () => {
               setIsSignUp(false);
               setPassword('');
@@ -121,6 +135,26 @@ export default function AuthScreen() {
       if (signInError) { setError(signInError.message); setLoading(false); }
     } catch (err) { setError('Connection error. Please try again.'); setLoading(false); }
   };
+
+  const handleResetPassword = async () => {
+    if (!email.trim()) return setError('Email is required to reset password');
+    setLoading(true);
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+        redirectTo: 'curablemobile://auth-callback',
+      });
+      if (resetError) {
+        setError(resetError.message);
+      } else {
+        Alert.alert('Reset Email Sent', 'Check your email for the password reset link.');
+      }
+    } catch (err) {
+      setError('Error sending reset email.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -204,10 +238,22 @@ export default function AuthScreen() {
               style={styles.toggleButton}
               onPress={() => setIsSignUp(!isSignUp)}
             >
-              <Text style={[styles.toggleText, { color: colors.textMuted }]}>
-                {isSignUp ? 'Already have an account? Sign In' : 'New user? Establish Account'}
+              <Text style={[styles.toggleText, { color: isSignUp ? colors.textMuted : '#3B82F6' }]}>
+                {isSignUp ? 'Already have an account? Sign In' : "I don't have an account"}
               </Text>
             </TouchableOpacity>
+
+            {!isSignUp && (
+              <TouchableOpacity
+                style={styles.forgotButton}
+                onPress={handleResetPassword}
+              >
+                <Text style={[styles.forgotText, { color: colors.textMuted }]}>
+                  I forgot password
+                </Text>
+              </TouchableOpacity>
+            )}
+
           </View>
 
           <View style={styles.footer}>
@@ -240,8 +286,10 @@ const styles = StyleSheet.create({
   errorText: { fontSize: 14, marginBottom: 20, textAlign: 'center' },
   primaryButton: { height: 56, borderRadius: 16, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
   primaryButtonText: { fontSize: 16, fontWeight: '600' },
-  toggleButton: { marginTop: 24, paddingVertical: 12 },
+  toggleButton: { marginTop: 24, paddingVertical: 8 },
   toggleText: { fontSize: 14, textAlign: 'center' },
+  forgotButton: { marginTop: 12, paddingVertical: 8 },
+  forgotText: { fontSize: 14, textAlign: 'center', textDecorationLine: 'underline' },
   footer: { marginTop: 'auto', paddingTop: 40 },
   footerText: { fontSize: 12, textAlign: 'center', lineHeight: 18 },
 });

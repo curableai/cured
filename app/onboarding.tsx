@@ -44,9 +44,9 @@ const OnboardingScreen = () => {
             colors={colors}
           />
           <FeatureItem
-            icon="cpu"
-            title="AI Diagnostics"
-            description="Evidence-based insights generated from your personal health signals."
+            icon="message-circle"
+            title="AI Health Partner"
+            description="Conversational health assistant for personalized insights and guidance."
             colors={colors}
           />
           <FeatureItem

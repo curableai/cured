@@ -20,8 +20,12 @@ interface UserHealthProfile {
   smoker: boolean;
   alcoholDrinker: boolean;
   chronicConditions: string[];
+  otherChronicConditions?: string;
+  otherBehavioralFactors?: string;
   longTermMedications: string[];
   familyHistory: string[];
+  otherFamilyHistory?: string;
+  genotype?: string;
 
   // Latest metrics
   heartRate?: number;
@@ -117,8 +121,12 @@ export async function getUserHealthProfile(userId: string): Promise<UserHealthPr
       smoker: onboarding.smoker,
       alcoholDrinker: onboarding.alcohol_drinker,
       chronicConditions: onboarding.chronic_conditions || [],
+      otherChronicConditions: onboarding.other_chronic_conditions,
+      otherBehavioralFactors: onboarding.other_behavioral_factors,
       longTermMedications: onboarding.long_term_medications || [],
       familyHistory: onboarding.family_history || [],
+      otherFamilyHistory: onboarding.other_family_history,
+      genotype: onboarding.genotype,
 
       heartRate: (heartRateSignal?.value as number) || latestMetrics?.heart_rate,
       restingHeartRate: latestMetrics?.resting_heart_rate,
@@ -408,7 +416,9 @@ export async function chatWithHealthAI(
     systemPrompt += `Age: ${calculateAge(profile.dateOfBirth)} years\n`;
     systemPrompt += `Gender: ${profile.gender}\n`;
     systemPrompt += `Location: ${profile.location}\n`;
-    systemPrompt += `Chronic Conditions: ${profile.chronicConditions.join(', ') || 'None'}\n`;
+    systemPrompt += `Genotype: ${profile.genotype || 'Unknown'}\n`;
+    systemPrompt += `Chronic Conditions: ${profile.chronicConditions.join(', ') || 'None'}${profile.otherChronicConditions ? ` (Other: ${profile.otherChronicConditions})` : ''}\n`;
+    systemPrompt += `Behavioral Factors: ${profile.smoker ? 'Smoker' : 'Non-smoker'}, ${profile.alcoholDrinker ? 'Alcohol' : 'No alcohol'}${profile.otherBehavioralFactors ? `, Other: ${profile.otherBehavioralFactors}` : ''}\n`;
 
     // Detailed Medications
     systemPrompt += `Medications: ${medications.length > 0 ? medications.map(m => `${m.name} (${m.dosage}, ${m.frequency})`).join(', ') : 'None reported'}\n`;

@@ -52,10 +52,8 @@ export default function ProfileScreen() {
 
   const menuItems = [
     { label: 'Clinical Bio-Data', icon: 'finger-print', route: '/clinical-biodata' },
-    { label: 'Pharmacological Regimen', icon: 'medical', route: '/medication' },
     { label: 'Sensor Integration', icon: 'watch', route: '/connect-device' },
-    { label: 'System Disclaimer', icon: 'document-text', route: '/disclaimer' },
-    { label: 'Support Terminal', icon: 'help-buoy', route: null },
+    { label: 'Customer Service', icon: 'help-buoy', route: null },
   ];
 
   if (loading) {
@@ -94,12 +92,18 @@ export default function ProfileScreen() {
               key={index}
               style={[styles.listItem, { backgroundColor: '#0D0D0D' }]}
               onPress={() => {
-                if (item.label === 'Support Terminal') {
-                  Alert.alert('Support Terminal', 'Phone: 08105535057\nEmail: curable4@gmail.com');
+                if (item.label === 'Customer Service') {
+                  Alert.alert(
+                    'Customer Service',
+                    'Phone: 08105535057\nEmail: curable4@gmail.com\n\n(Tip: You can long-press to select and copy)',
+                    [
+                      { text: 'OK', style: 'default' }
+                    ]
+                  );
                 } else if (item.route) {
                   router.push(item.route as any);
                 } else {
-                  Alert.alert('Coming Soon', 'This terminal feature is under development.');
+                  Alert.alert('Coming Soon', 'This feature is under development.');
                 }
               }}
             >

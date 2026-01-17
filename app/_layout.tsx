@@ -4,10 +4,11 @@ import { useAuthStore } from '@/lib/authStore';
 import { handleNotificationResponse, requestNotificationPermissions, scheduleDailyCheckin } from '@/lib/checkinNotification';
 import { initializeHealthKit } from '@/lib/healthkitManager';
 import { supabase } from '@/lib/supabaseClient';
+import * as Linking from 'expo-linking';
 import * as Notifications from 'expo-notifications';
 import { SplashScreen, Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
 
 // Prevent splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
@@ -21,11 +22,49 @@ export default function RootLayout() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [userRole, setUserRole] = useState<'patient' | 'doctor' | null>(null);
-  const { hasCompletedOnboarding, setHasCompletedOnboarding } = useAuthStore();
+  const { hasCompletedOnboarding, setHasCompletedOnboarding, hasAcceptedTerms, setHasAcceptedTerms } = useAuthStore();
 
   // Initialize app on mount
   useEffect(() => {
     initializeApp();
+
+    // Handle Deep Links (for email confirmation and password reset)
+    const handleDeepLink = async (url: string | null) => {
+      if (!url) return;
+      console.log('Incoming deep link:', url);
+
+      const parsed = Linking.parse(url);
+      const { fragment } = parsed;
+
+      // Supabase returns tokens in the hash fragment for implicit flow
+      if (fragment) {
+        const params = new URLSearchParams(fragment);
+        const accessToken = params.get('access_token');
+        const refreshToken = params.get('refresh_token');
+
+        if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+          if (error) {
+            console.error('Error setting session from deep link:', error.message);
+            Alert.alert('Authentication Error', 'Could not complete the sign-in process.');
+          } else {
+            console.log('Successfully authenticated via deep link');
+          }
+        }
+      }
+    };
+
+    // Initial link
+    Linking.getInitialURL().then(handleDeepLink);
+
+    // Listener for new links
+    const linkSubscription = Linking.addEventListener('url', (event) => {
+      handleDeepLink(event.url);
+    });
 
     // Setup Notifications
     requestNotificationPermissions().then(granted => {
@@ -34,11 +73,14 @@ export default function RootLayout() {
       }
     });
 
-    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
+    const notificationSubscription = Notifications.addNotificationResponseReceivedListener(response => {
       handleNotificationResponse(response, router);
     });
 
-    return () => subscription.remove();
+    return () => {
+      linkSubscription.remove();
+      notificationSubscription.remove();
+    };
   }, []);
 
   // Listen for auth state changes
@@ -57,7 +99,7 @@ export default function RootLayout() {
             .from('doctors')
             .select('id')
             .eq('user_id', session.user.id)
-            .single();
+            .maybeSingle();
 
           setUserRole(doctor ? 'doctor' : 'patient');
 
@@ -66,11 +108,24 @@ export default function RootLayout() {
             .from('profiles')
             .select('onboarding_completed')
             .eq('id', session.user.id)
-            .single();
+            .maybeSingle();
 
           setHasCompletedOnboarding(!!profile?.onboarding_completed);
           console.log('Onboarding status:', !!profile?.onboarding_completed);
 
+          // Check T&C status
+          const { data: acceptance } = await supabase
+            .from('disclaimer_acceptances')
+            .select('id')
+            .eq('user_id', session.user.id)
+            .eq('disclaimer_type', 'TERMS_AND_CONDITIONS')
+            .maybeSingle();
+
+          setHasAcceptedTerms(!!acceptance);
+          console.log('T&C status:', !!acceptance);
+        } else if (event === 'PASSWORD_RECOVERY') {
+          console.log('Password recovery event detected');
+          router.replace('/reset-password' as any);
         } else if (event === 'SIGNED_OUT') {
           setIsAuthenticated(false);
           setUserRole(null);
@@ -113,6 +168,17 @@ export default function RootLayout() {
         setHasCompletedOnboarding(!!profile?.onboarding_completed);
         console.log('App init onboarding status:', !!profile?.onboarding_completed);
 
+        // Check T&C status
+        const { data: acceptance } = await supabase
+          .from('disclaimer_acceptances')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('disclaimer_type', 'TERMS_AND_CONDITIONS')
+          .maybeSingle();
+
+        setHasAcceptedTerms(!!acceptance);
+        console.log('App init T&C status:', !!acceptance);
+
       } else {
         setIsAuthenticated(false);
         setUserRole(null);
@@ -149,14 +215,19 @@ export default function RootLayout() {
         }
       } else {
         // Patient Role
-        if (!hasCompletedOnboarding) {
+        if (!hasAcceptedTerms) {
+          // Force to T&C first
+          if (currentRoute !== 'terms-conditions') {
+            router.replace('/terms-conditions');
+          }
+        } else if (!hasCompletedOnboarding) {
           // If not completed onboarding, force to profile-setup
           if (currentRoute !== 'profile-setup') {
             router.replace('/profile-setup');
           }
         } else {
           // Onboarding complete
-          if (inAuthScreen || inProfileSetup) {
+          if (inAuthScreen || inProfileSetup || currentRoute === 'terms-conditions') {
             router.replace('/ai-assistant');
           } else if (inDoctorGroup) {
             router.replace('/ai-assistant');
@@ -233,6 +304,16 @@ export default function RootLayout() {
               gestureEnabled: false, // Prevent swipe back during check-in
               headerShown: false
             }}
+          />
+
+          <Stack.Screen
+            name="terms-conditions"
+            options={{ gestureEnabled: false }}
+          />
+
+          <Stack.Screen
+            name="reset-password"
+            options={{ gestureEnabled: false }}
           />
 
           <Stack.Screen

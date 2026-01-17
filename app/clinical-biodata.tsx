@@ -241,6 +241,18 @@ export default function ClinicalBiodataScreen() {
                             />
                         </View>
                     </View>
+
+                    <View style={styles.field}>
+                        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Body Mass Index (BMI)</Text>
+                        <View style={[styles.input, { borderBottomColor: 'transparent', justifyContent: 'center' }]}>
+                            <Text style={{ color: colors.primary, fontSize: 18, fontWeight: '800' }}>
+                                {tempData?.weight_kg && tempData?.height_cm
+                                    ? (tempData.weight_kg / ((tempData.height_cm / 100) * (tempData.height_cm / 100))).toFixed(1)
+                                    : '--'
+                                }
+                            </Text>
+                        </View>
+                    </View>
                 </View>
 
                 <View style={[styles.section, { backgroundColor: '#0D0D0D' }]}>
