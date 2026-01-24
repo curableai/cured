@@ -36,6 +36,7 @@ interface OnboardingData {
   family_history: string[];
   other_family_history: string;
   genotype: string;
+  occupation: string;
 }
 
 const GENOTYPES = ['AA', 'AS', 'AC', 'SS', 'SC'];
@@ -74,7 +75,8 @@ export default function Onboarding() {
     long_term_medications: '',
     family_history: [],
     other_family_history: '',
-    genotype: ''
+    genotype: '',
+    occupation: ''
   });
 
   const totalSteps = 4;
@@ -222,7 +224,8 @@ export default function Onboarding() {
           long_term_medications: data.long_term_medications.split('\n').filter((x: string) => x.trim()),
           family_history: data.family_history,
           other_family_history: data.other_family_history || null,
-          genotype: data.genotype || null
+          genotype: data.genotype || null,
+          occupation: data.occupation || null
         });
 
       if (onboardingError) {
@@ -427,6 +430,17 @@ export default function Onboarding() {
                   </TouchableOpacity>
                 ))}
               </View>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: colors.text }]}>Occupation</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: '#121212', borderColor: '#333', color: colors.text }]}
+                placeholder="Examples: Teacher, Engineer, Student"
+                placeholderTextColor="#666"
+                value={data.occupation}
+                onChangeText={(text) => handleInputChange('occupation', text)}
+              />
             </View>
           </View>
         );
