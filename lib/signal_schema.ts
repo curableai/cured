@@ -1282,6 +1282,69 @@ const CONTEXT_SIGNALS: SignalDefinition[] = [
         allowedSources: ['onboarding', 'chat_confirmed'],
         question: 'What type of area do you live in?',
         chips: ['Urban', 'Suburban', 'Rural']
+    },
+    {
+        id: 'occupation',
+        category: 'context',
+        name: 'Occupation',
+        valueType: 'text',
+        validation: {},
+        frequency: 'once',
+        freshnessWindow: 999999,
+        trackTrend: false,
+        trendWindow: 0,
+        affectsRisk: true,
+        riskWeight: 0.5,
+        allowedSources: ['onboarding', 'chat_confirmed', 'manual_input'],
+        question: 'What is your occupation?'
+    },
+    {
+        id: 'work_hours',
+        category: 'context',
+        name: 'Work Hours',
+        valueType: 'text',
+        validation: {},
+        frequency: 'once',
+        freshnessWindow: 999999,
+        trackTrend: false,
+        trendWindow: 0,
+        affectsRisk: true,
+        riskWeight: 0.5,
+        allowedSources: ['onboarding', 'chat_confirmed', 'manual_input'],
+        question: 'What are your average work hours?'
+    },
+    {
+        id: 'work_environment',
+        category: 'context',
+        name: 'Work Environment',
+        valueType: 'categorical',
+        validation: {
+            options: ['indoor_office', 'outdoor_field', 'remote_home', 'mixed', 'vehicle_transport']
+        },
+        frequency: 'once',
+        freshnessWindow: 999999,
+        trackTrend: false,
+        trendWindow: 0,
+        affectsRisk: true,
+        riskWeight: 0.4,
+        allowedSources: ['onboarding', 'chat_confirmed'],
+        question: 'What is your work environment?',
+        chips: ['Indoor', 'Outdoor', 'Remote', 'Mixed', 'Transport']
+    },
+    {
+        id: 'work_related_health_issues',
+        category: 'context',
+        name: 'Work Related Health Issues',
+        valueType: 'text',
+        validation: {},
+        frequency: 'once',
+        freshnessWindow: 999999,
+        trackTrend: false,
+        trendWindow: 0,
+        affectsRisk: true,
+        riskWeight: 0.6,
+        allowedSources: ['onboarding', 'chat_confirmed', 'manual_input'],
+        question: 'Any health issues related to work?'
     }
 ];
 

@@ -260,6 +260,14 @@ export default function AuthScreen() {
             <Text style={[styles.footerText, { color: colors.textLight }]}>
               Secured with 256-bit encryption. Access is restricted to authorized users only.
             </Text>
+            {__DEV__ && (
+              <TouchableOpacity
+                style={{ marginTop: 20, padding: 10, backgroundColor: '#333', borderRadius: 8 }}
+                onPress={() => router.replace('/profile-setup')}
+              >
+                <Text style={{ color: '#fff', textAlign: 'center', fontSize: 12 }}>Debug: Test Onboarding (Skip Auth)</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
         </ScrollView>

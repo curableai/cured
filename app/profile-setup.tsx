@@ -19,10 +19,20 @@ import {
 } from 'react-native';
 
 
+// ... imports ...
+
 interface OnboardingData {
   full_name: string;
   date_of_birth: string;
   gender: string;
+  // New fields
+  occupation_category: string;
+  work_hours: string; // New
+  work_environment: string; // New
+  work_related_health_issues: string; // New
+  work_exposures: string[];
+  work_stress_level: string;
+  // Existing fields
   weight_kg: string;
   height_cm: string;
   location: string;
@@ -52,6 +62,31 @@ const FAMILY_HISTORY_CONDITIONS = [
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 
+// New Constants for Step 2
+// Removed OCCUPATION_OPTIONS as it is now free text
+
+const ENVIRONMENT_OPTIONS = [
+  'Indoor / Office', 'Outdoor / Field', 'Remote / Home', 'Mixed (Indoor & Outdoor)', 'Vehicle / Transport'
+];
+
+const WORK_HOURS_OPTIONS = [
+  '1-2 hours', '3-4 hours', '5-6 hours', '7-8 hours', '9-10 hours', '10+ hours'
+];
+
+const WORK_EXPOSURES = [
+  'Long sitting', 'Long standing or lifting', 'Night shifts or late nights',
+  'Dust, smoke, or chemicals', 'Blood or body fluid exposure', 'Loud noise',
+  'Heat or sun exposure'
+];
+
+const STRESS_LEVEL_OPTIONS = [
+  'I feel okay most days',
+  'I feel tired or overwhelmed often',
+  'I feel anxious most days',
+  'I feel down or unmotivated for weeks',
+  'I’d rather not say'
+];
+
 export default function Onboarding() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -62,6 +97,13 @@ export default function Onboarding() {
     full_name: '',
     date_of_birth: '',
     gender: '',
+    // Initialize new fields
+    occupation_category: '', // Now free text
+    work_hours: '',
+    work_environment: '',
+    work_related_health_issues: '',
+    work_exposures: [],
+    work_stress_level: '',
     weight_kg: '',
     height_cm: '',
     location: '',
@@ -77,12 +119,13 @@ export default function Onboarding() {
     genotype: ''
   });
 
-  const totalSteps = 4;
+  const totalSteps = 5; // Updated from 4
   const [heightUnit, setHeightUnit] = useState<'cm' | 'ft'>('cm');
   const [feet, setFeet] = useState('');
   const [inches, setInches] = useState('');
 
   const handleInputChange = (field: keyof OnboardingData, value: any) => {
+    console.log('[handleInputChange]', field, value);
     setData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -131,7 +174,7 @@ export default function Onboarding() {
   };
 
 
-  const toggleArrayItem = (field: 'chronic_conditions' | 'family_history', item: string) => {
+  const toggleArrayItem = (field: 'chronic_conditions' | 'family_history' | 'work_exposures', item: string) => {
     setData(prev => ({
       ...prev,
       [field]: prev[field].includes(item)
@@ -156,7 +199,21 @@ export default function Onboarding() {
           return false;
         }
         return true;
-      case 2:
+      case 2: // New Step: Occupation & Context
+        if (!data.occupation_category.trim()) {
+          Alert.alert('Required', 'Please enter your occupation');
+          return false;
+        }
+        if (!data.work_hours) {
+          Alert.alert('Required', 'Please select your work hours');
+          return false;
+        }
+        if (!data.work_stress_level) {
+          Alert.alert('Required', 'Please answer the check-in question');
+          return false;
+        }
+        return true;
+      case 3: // Physiology (Was Step 2)
         if (!data.weight_kg || parseFloat(data.weight_kg) <= 0) {
           Alert.alert('Required', 'Please enter your weight');
           return false;
@@ -210,6 +267,14 @@ export default function Onboarding() {
           full_name: data.full_name,
           date_of_birth: data.date_of_birth,
           gender: data.gender,
+          // New fields
+          occupation_category: data.occupation_category,
+          work_hours: data.work_hours,
+          work_environment: data.work_environment,
+          work_related_health_issues: data.work_related_health_issues,
+          work_exposures: data.work_exposures,
+          work_stress_level: data.work_stress_level,
+
           weight_kg: parseFloat(data.weight_kg),
           height_cm: parseFloat(data.height_cm),
           location: data.location || null,
@@ -299,6 +364,70 @@ export default function Onboarding() {
             unit: 'years',
             source: 'onboarding',
             context: {},
+            capturedAt: now
+          }));
+        }
+
+        // New Work-Related Signals
+        if (data.occupation_category) {
+          signalsToCapture.push(clinicalSignalService.captureSignal({
+            signalId: 'occupation',
+            value: data.occupation_category,
+            source: 'onboarding',
+            context: {},
+            capturedAt: now
+          }));
+        }
+
+        if (data.work_hours) {
+          signalsToCapture.push(clinicalSignalService.captureSignal({
+            signalId: 'work_hours',
+            value: data.work_hours,
+            source: 'onboarding',
+            context: {},
+            capturedAt: now
+          }));
+        }
+
+        if (data.work_environment) {
+          let envValue = 'mixed';
+          if (data.work_environment.includes('Indoor')) envValue = 'indoor_office';
+          if (data.work_environment.includes('Outdoor')) envValue = 'outdoor_field';
+          if (data.work_environment.includes('Remote')) envValue = 'remote_home';
+          if (data.work_environment.includes('Vehicle')) envValue = 'vehicle_transport';
+
+          signalsToCapture.push(clinicalSignalService.captureSignal({
+            signalId: 'work_environment',
+            value: envValue,
+            source: 'onboarding',
+            context: {},
+            capturedAt: now
+          }));
+        }
+
+        if (data.work_related_health_issues) {
+          signalsToCapture.push(clinicalSignalService.captureSignal({
+            signalId: 'work_related_health_issues',
+            value: data.work_related_health_issues,
+            source: 'onboarding',
+            context: {},
+            capturedAt: now
+          }));
+        }
+
+        // Capture Stress Level as a Signal
+        if (data.work_stress_level) {
+          let stressValue = 'normal';
+          if (data.work_stress_level.includes('anxious')) stressValue = 'stressed';
+          if (data.work_stress_level.includes('overwhelmed')) stressValue = 'very_stressed';
+          if (data.work_stress_level.includes('okay')) stressValue = 'relaxed';
+
+          signalsToCapture.push(clinicalSignalService.captureSignal({
+            signalId: 'stress_level',
+            value: stressValue,
+            unit: 'n/a',
+            source: 'onboarding',
+            context: { notes: data.work_stress_level },
             capturedAt: now
           }));
         }
@@ -431,7 +560,158 @@ export default function Onboarding() {
           </View>
         );
 
-      case 2:
+      case 2: // NEW STEP: Occupation & Content
+        return (
+          <View style={styles.stepContainer}>
+            <View style={styles.stepHeader}>
+              <Text style={[styles.stepTitle, { color: colors.text }]}>Occupation & Context</Text>
+              <Text style={[styles.stepSubtitle, { color: colors.textMuted }]}>Help us understand your environmental risks.</Text>
+            </View>
+
+            {/* Question 1: Occupation (Free Text) */}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: colors.text }]}>What is your occupation?</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: '#121212', borderColor: '#333', color: colors.text }]}
+                placeholder="E.g. Student, Software Engineer, Nurse..."
+                placeholderTextColor="#666"
+                value={data.occupation_category}
+                onChangeText={(text) => handleInputChange('occupation_category', text)}
+              />
+            </View>
+
+            {/* Question 1.5: Work Hours (Selection) */}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: colors.text }]}>Average Work Hours (Daily)</Text>
+              <View style={styles.conditionsGrid}>
+                {WORK_HOURS_OPTIONS.map((option) => (
+                  <TouchableOpacity
+                    key={option}
+                    style={[
+                      styles.conditionChip,
+                      {
+                        backgroundColor: data.work_hours === option ? colors.primary + '22' : '#121212',
+                        borderColor: data.work_hours === option ? colors.primary : '#333'
+                      }
+                    ]}
+                    onPress={() => handleInputChange('work_hours', option)}
+                  >
+                    <Text style={[
+                      styles.conditionChipText,
+                      { color: data.work_hours === option ? colors.primary : colors.textMuted }
+                    ]}>{option}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Question 1.7: Work Environment (Selection) */}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: colors.text }]}>Work Environment</Text>
+              <View style={styles.conditionsGrid}>
+                {ENVIRONMENT_OPTIONS.map((option) => (
+                  <TouchableOpacity
+                    key={option}
+                    style={[
+                      styles.conditionChip,
+                      {
+                        backgroundColor: data.work_environment === option ? colors.primary + '22' : '#121212',
+                        borderColor: data.work_environment === option ? colors.primary : '#333'
+                      }
+                    ]}
+                    onPress={() => handleInputChange('work_environment', option)}
+                  >
+                    <Text style={[
+                      styles.conditionChipText,
+                      { color: data.work_environment === option ? colors.primary : colors.textMuted }
+                    ]}>{option}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Question 2: Exposures (Conditional) */}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: colors.text }]}>Does your work or study involve any of these?</Text>
+              <View style={styles.conditionsGrid}>
+                {WORK_EXPOSURES.map((option) => (
+                  <TouchableOpacity
+                    key={option}
+                    style={[
+                      styles.conditionChip,
+                      {
+                        backgroundColor: data.work_exposures.includes(option) ? colors.primary + '22' : '#121212',
+                        borderColor: data.work_exposures.includes(option) ? colors.primary : '#333'
+                      }
+                    ]}
+                    onPress={() => toggleArrayItem('work_exposures', option)}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                      <Text style={[
+                        styles.conditionChipText,
+                        { color: data.work_exposures.includes(option) ? colors.primary : colors.textMuted }
+                      ]}>{option}</Text>
+                      {data.work_exposures.includes(option) && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                    </View>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  style={[
+                    styles.conditionChip,
+                    { borderColor: '#333', backgroundColor: '#121212' }
+                  ]}
+                  onPress={() => handleInputChange('work_exposures', [])}
+                >
+                  <Text style={[styles.conditionChipText, { color: colors.textMuted }]}>None of these</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+
+            {/* Question 3: Functional Stress Check */}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: colors.text }]}>Lately, how has your work or school been affecting you?</Text>
+              <View style={styles.conditionsGrid}>
+                {STRESS_LEVEL_OPTIONS.map((option) => (
+                  <TouchableOpacity
+                    key={option}
+                    style={[
+                      styles.conditionChip,
+                      {
+                        width: '100%',
+                        backgroundColor: data.work_stress_level === option ? colors.primary + '22' : '#121212',
+                        borderColor: data.work_stress_level === option ? colors.primary : '#333'
+                      }
+                    ]}
+                    onPress={() => handleInputChange('work_stress_level', option)}
+                  >
+                    <Text style={[
+                      styles.conditionChipText,
+                      { color: data.work_stress_level === option ? colors.primary : colors.textMuted }
+                    ]}>{option}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* New Question: Health Problems (Free Text) */}
+            <View style={styles.inputGroup}>
+              <Text style={[styles.label, { color: colors.text }]}>Common health problems encountered due to this work?</Text>
+              <TextInput
+                style={[styles.textarea, { backgroundColor: '#121212', borderColor: '#333', color: colors.text, height: 80 }]}
+                placeholder="E.g. Back pain, eye strain, anxiety..."
+                placeholderTextColor="#666"
+                multiline
+                numberOfLines={3}
+                value={data.work_related_health_issues}
+                onChangeText={(text) => handleInputChange('work_related_health_issues', text)}
+              />
+            </View>
+
+          </View>
+        );
+
+      case 3: // Renumbered from 2
         return (
           <View style={styles.stepContainer}>
             <View style={styles.stepHeader}>
@@ -573,13 +853,14 @@ export default function Onboarding() {
           </View>
         );
 
-      case 3:
+      case 4: // Renumbered from 3
         return (
           <View style={styles.stepContainer}>
             <View style={styles.stepHeader}>
               <Text style={[styles.stepTitle, { color: colors.text }]}>Medical History</Text>
               <Text style={[styles.stepSubtitle, { color: colors.textMuted }]}>Document diagnosed chronic conditions</Text>
             </View>
+// ... continued in next replacement chunk because this file is large ...
 
             <View style={styles.conditionsGrid}>
               {CHRONIC_CONDITIONS.map((condition) => (
@@ -630,7 +911,7 @@ export default function Onboarding() {
           </View>
         );
 
-      case 4:
+      case 5: // Renumbered from 4
         return (
           <View style={styles.stepContainer}>
             <View style={styles.stepHeader}>
@@ -911,13 +1192,18 @@ const styles = StyleSheet.create({
   },
   conditionChip: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingVertical: 12, // Increased slightly for better touch target
+    borderRadius: 12, // Less rounded, more button-like
     borderWidth: 1,
+    flexGrow: 1, // Allow chips to expand to fill row
+    alignItems: 'center',
+    justifyContent: 'center',
+    margin: 2, // Tiny margin to prevent border overlap visual issues if any
   },
   conditionChipText: {
     fontSize: 14,
     fontWeight: '500',
+    textAlign: 'center', // Center text within the expanded chip
   },
   buttonContainer: {
     flexDirection: 'row',

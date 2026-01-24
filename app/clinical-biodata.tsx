@@ -25,6 +25,11 @@ interface Biodata {
     location: string;
     chronic_conditions: string[];
     long_term_medications: string[];
+    // New fields
+    occupation_category: string;
+    work_hours: string;
+    work_environment: string;
+    work_related_health_issues: string;
 }
 
 export default function ClinicalBiodataScreen() {
@@ -94,6 +99,11 @@ export default function ClinicalBiodataScreen() {
                 location: onboarding.location,
                 chronic_conditions: onboarding.chronic_conditions || [],
                 long_term_medications: onboarding.long_term_medications || [],
+                // New fields mapping
+                occupation_category: onboarding.occupation_category || '',
+                work_hours: onboarding.work_hours || '',
+                work_environment: onboarding.work_environment || '',
+                work_related_health_issues: onboarding.work_related_health_issues || '',
             };
 
             setData(bio);
@@ -125,6 +135,11 @@ export default function ClinicalBiodataScreen() {
                     location: tempData.location,
                     chronic_conditions: tempData.chronic_conditions,
                     long_term_medications: tempData.long_term_medications,
+                    // New fields update
+                    occupation_category: tempData.occupation_category,
+                    work_hours: tempData.work_hours,
+                    work_environment: tempData.work_environment,
+                    work_related_health_issues: tempData.work_related_health_issues,
                     updated_at: new Date().toISOString(),
                 })
                 .eq('user_id', user.id);
@@ -202,6 +217,53 @@ export default function ClinicalBiodataScreen() {
                             value={tempData?.gender}
                             editable={editing}
                             onChangeText={(val) => setTempData(prev => ({ ...prev!, gender: val }))}
+                        />
+                    </View>
+                </View>
+
+                <View style={[styles.section, { backgroundColor: '#0D0D0D' }]}>
+                    <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>OCCUPATIONAL CONTEXT</Text>
+
+                    <View style={styles.field}>
+                        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Occupation</Text>
+                        <TextInput
+                            style={[styles.input, { color: colors.text, borderBottomColor: editing ? colors.primary : 'transparent' }]}
+                            value={tempData?.occupation_category}
+                            editable={editing}
+                            onChangeText={(val) => setTempData(prev => ({ ...prev!, occupation_category: val }))}
+                        />
+                    </View>
+
+                    <View style={styles.row}>
+                        <View style={[styles.field, { flex: 1 }]}>
+                            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Work Hours (Daily)</Text>
+                            <TextInput
+                                style={[styles.input, { color: colors.text, borderBottomColor: editing ? colors.primary : 'transparent' }]}
+                                value={tempData?.work_hours}
+                                editable={editing}
+                                keyboardType="numeric"
+                                onChangeText={(val) => setTempData(prev => ({ ...prev!, work_hours: val }))}
+                            />
+                        </View>
+                        <View style={[styles.field, { flex: 1 }]}>
+                            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Environment</Text>
+                            <TextInput
+                                style={[styles.input, { color: colors.text, borderBottomColor: editing ? colors.primary : 'transparent' }]}
+                                value={tempData?.work_environment}
+                                editable={editing}
+                                onChangeText={(val) => setTempData(prev => ({ ...prev!, work_environment: val }))}
+                            />
+                        </View>
+                    </View>
+
+                    <View style={styles.field}>
+                        <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Work-Related Health Issues</Text>
+                        <TextInput
+                            style={[styles.input, { color: colors.text, borderBottomColor: editing ? colors.primary : 'transparent' }]}
+                            value={tempData?.work_related_health_issues}
+                            editable={editing}
+                            multiline
+                            onChangeText={(val) => setTempData(prev => ({ ...prev!, work_related_health_issues: val }))}
                         />
                     </View>
                 </View>
