@@ -56,7 +56,7 @@ IMPORTANT RULES:
 4. Make questions conversational and non-medical
 5. Vary the pillars: wellness, energy, sleep, pain, mood, medication adherence, lifestyle
 
-Return ONLY this JSON format:
+Return ONLY this JSON format. ensure "options" array is ALWAYS included and has at least 2 items:
 {
   "questions": [
     {
@@ -64,7 +64,10 @@ Return ONLY this JSON format:
       "pillar": "category",
       "question": "Natural question text?",
       "helpText": "optional guidance",
-      "options": [{"label": "Option", "value": "value"}]
+      "options": [
+        {"label": "Label to show user", "value": "value_to_store"},
+        {"label": "Another option", "value": "another_value"}
+      ]
     }
   ]
 }`;
@@ -185,16 +188,22 @@ Return ONLY this JSON format:
             const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 
             if (!OPENAI_API_KEY) {
-                return { score: 0, feedback: "Analysis engine offline. Please try again.", insights: [] };
+                console.warn('[AICheckinService] No API key found, using local fallback.');
+                return this.scoreCheckinLocally(answers);
             }
 
-            const prompt = `Score this health check-in response: ${JSON.stringify(answers)}
+            const prompt = `As a clinical health assistant, analyze these daily check-in responses: ${JSON.stringify(answers)}
+
+Provide:
+1. A lifestyle score (0-100) based on positive/negative health behaviors.
+2. "feedback": A warm, encouraging paragraph (2-3 sentences) giving specific advice based on their lowest scoring answers. If they reported low energy, poor sleep, or high stress, address that directly with a tip.
+3. "insights": 2-3 short, bullet-point observations about their patterns today.
 
 Return ONLY this JSON:
 {
   "score": 85,
-  "feedback": "Your feedback here",
-  "insights": ["insight1", "insight2"]
+  "feedback": "Specific advice based on their answers...",
+  "insights": ["Observation 1", "Observation 2"]
 }`;
 
             const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -271,6 +280,35 @@ Return ONLY this JSON:
                 ]
             }
         ];
+    }
+    /**
+     * Local fallback scoring when AI is unavailable.
+     */
+    private scoreCheckinLocally(answers: any): { score: number, feedback: string, insights: string[] } {
+        let score = 75; // Base score
+        const insights: string[] = [];
+
+        // Simple heuristic scoring
+        if (answers.energy_level === 'high') score += 5;
+        if (answers.energy_level === 'low') { score -= 10; insights.push("Energy is lower than usual."); }
+
+        if (answers.sleep_quality === 'excellent' || answers.sleep_quality === 'good') score += 5;
+        if (answers.sleep_quality === 'poor') { score -= 10; insights.push("Sleep quality needs improvement."); }
+
+        if (answers.stress_level === 'relaxed') score += 5;
+        if (answers.stress_level === 'stressed' || answers.stress_level === 'very_stressed') {
+            score -= 10;
+            insights.push("High stress levels detected.");
+        }
+
+        // Clamp score
+        score = Math.max(0, Math.min(100, score));
+
+        let feedback = "Thanks for checking in! Keep monitoring your healthy habits.";
+        if (score < 60) feedback = "It looks like you're having a tough day. Try to get some rest and stay hydrated.";
+        if (score > 85) feedback = "You're doing great! Keep up the excellent work.";
+
+        return { score, feedback, insights: insights.length > 0 ? insights : ["Stable vitals", "Consistent consistency"] };
     }
 }
 
